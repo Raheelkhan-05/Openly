@@ -1,4 +1,4 @@
-const { parseUA } = require('./ua');
+const { parseUA, describeDevice } = require('./ua');
 
 const BOT_UA = /(bot\b|crawler|spider|scanner|curl\/|wget|python-requests|python-urllib|go-http-client|java\/|okhttp|headless|phantomjs|barracuda|proofpoint|mimecast|symantec|trendmicro|safelinks|urlscan|postman|node-fetch|axios|libwww|monitor)/i;
 const PROXY_UA = /(GoogleImageProxy|YahooMailProxy)/i;
@@ -74,10 +74,13 @@ function summarize(email, events, views, mutes, rules) {
   let openCount = 0, clickCount = 0, possible = 0, sender = 0;
   let firstAt = null, lastAt = null, lastCountedOpenAt = null, directOpen = false;
   const devices = new Set();
+  const deviceCounts = { desktop: 0, mobile: 0, tablet: 0, hidden: 0, unknown: 0 };
+  let lastDevice = null; // the most recent counted request whose device is actually known
   const clicked = new Map();
 
   const out = items.map(({ ev, t, c }) => {
     const info = parseUA(ev.user_agent);
+    const dev = describeDevice(ev.user_agent, ev.source, ev.type || 'open');
     const item = {
       id: ev.id,
       type: ev.type || 'open',
@@ -91,12 +94,20 @@ function summarize(email, events, views, mutes, rules) {
       link_url: ev.type === 'click' ? linkUrl(ev.link_n) : null,
       marked_mine: !!ev.mine,
       ...info,
+      device_kind: dev.kind,
+      device_label: dev.label,
+      device_detail: dev.detail,
+      device_basis: dev.basis,
     };
     if (c.kind === 'recipient') {
       firstAt = firstAt || ev.occurred_at;
       lastAt = ev.occurred_at;
       const direct = !c.flags.includes('image_proxy');
       if (direct) devices.add(`${info.browser}|${info.os}|${info.device}`);
+      if (!(item.type !== 'click' && lastCountedOpenAt !== null && t - lastCountedOpenAt < rules.sameOpenMs)) {
+        deviceCounts[dev.kind] += 1;
+        if (dev.kind !== 'hidden' && dev.kind !== 'unknown') lastDevice = { kind: dev.kind, label: dev.label, detail: dev.detail, basis: dev.basis, at: ev.occurred_at };
+      }
       if (item.type === 'click') {
         clickCount += 1;
         clicked.set(ev.link_n, (clicked.get(ev.link_n) || 0) + 1);
@@ -134,6 +145,8 @@ function summarize(email, events, views, mutes, rules) {
     first_open_at: firstAt,
     last_open_at: lastAt,
     distinct_devices: devices.size,
+    device_counts: deviceCounts,
+    last_device: lastDevice,
     link_count: (email.links || []).length,
     clicked_links: [...clicked.entries()].map(([n, count]) => ({ n, url: linkUrl(n), count })),
     remind_at: email.remind_at || null,

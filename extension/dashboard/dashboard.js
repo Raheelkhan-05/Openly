@@ -169,29 +169,48 @@
           h('button', { class: 'row' + (e.token === state.selected ? ' selected' : ''), type: 'button', onclick: () => selectEmail(e.token) },
             tick(e.status),
             h('span', { class: 'row-main' }, h('span', { class: 'row-subject' }, subjectOf(e)), h('span', { class: 'row-sub' }, O.recipientsLabel(e))),
-            h('span', { class: 'row-meta' }, h('span', {}, O.timeAgo(e.sent_at)), e.click_count ? h('span', { class: 'row-count' }, plural(e.click_count, 'click', 'clicks')) : e.open_count ? h('span', { class: 'row-count' }, plural(e.open_count, 'open', 'opens')) : null)
+            h('span', { class: 'row-meta' }, h('span', {}, O.timeAgo(e.sent_at)), e.click_count ? h('span', { class: 'row-count' }, plural(e.click_count, 'click', 'clicks')) : e.open_count ? h('span', { class: 'row-count' }, plural(e.open_count, 'open', 'opens')) : null, e.last_device && DEVICE_SHORT[e.last_device.kind] ? h('span', { class: 'row-count' }, DEVICE_SHORT[e.last_device.kind]) : null)
           )
         )
       )
     );
   }
 
+  const DEVICE_SHORT = { mobile: 'Mobile', desktop: 'Desktop', tablet: 'Tablet' };
+  // One line on where the counted activity happened. Gmail and Apple hide the device on image loads; a link click shows it.
+  function deviceNote(e) {
+    const c = e.device_counts;
+    if (!c) return null;
+    const total = c.desktop + c.mobile + c.tablet + c.hidden + c.unknown;
+    if (!total) return null;
+    const parts = [
+      c.mobile && `mobile phone ${c.mobile}`,
+      c.desktop && `desktop / laptop ${c.desktop}`,
+      c.tablet && `tablet ${c.tablet}`,
+      c.hidden && `device hidden ${c.hidden}`,
+      c.unknown && `unknown ${c.unknown}`,
+    ].filter(Boolean);
+    let text = `Where it was read: ${parts.join(', ')}.`;
+    if (c.hidden && !(c.mobile + c.desktop + c.tablet)) text += " Gmail and Apple Mail hide the reader's device when they load images. A link click shows it exactly.";
+    return h('div', { class: 'note' }, icon('info', 16), h('span', {}, text));
+  }
+
   function eventItem(ev) {
     const isClick = ev.type === 'click';
     const title =
       ev.kind === 'sender' ? 'Not counted'
-      : ev.kind === 'possible' ? (isClick ? 'Possible click' : 'Possible open')
-      : isClick ? 'Clicked a link'
-      : ev.same_open ? 'Repeat request, same open'
-      : ev.open_index === 1 ? 'First open' : `Opened again (open ${ev.open_index})`;
-    const where = [ev.browser, ev.os, ev.device].filter((x) => x && x !== 'Unknown');
+        : ev.kind === 'possible' ? (isClick ? 'Possible click' : 'Possible open')
+          : isClick ? 'Clicked a link'
+            : ev.same_open ? 'Repeat request, same open'
+              : ev.open_index === 1 ? 'First open' : `Opened again (open ${ev.open_index})`;
+    const where = ev.device_detail ? [ev.device_detail] : [];
     const action = ev.kind === 'sender'
       ? ev.marked_mine ? h('button', { class: 'btn ghost small', type: 'button', onclick: () => markMine(ev.id, false) }, 'Not me') : null
       : h('button', { class: 'btn ghost small', type: 'button', onclick: () => markMine(ev.id, true) }, 'That was me');
     return h('li', { class: 'event' + (ev.same_open ? ' dup' : '') },
       tick(ev.kind === 'sender' ? 'none' : ev.kind === 'recipient' ? 'opened' : 'possible'),
       h('div', { class: 'event-body' },
-        h('div', { class: 'event-title' }, title, ...ev.flags.map((f) => h('span', { class: 'tag' }, FLAG_TEXT[f] || f))),
+        h('div', { class: 'event-title' }, title, ev.device_label ? h('span', { class: 'tag' }, ev.device_label) : null, ...ev.flags.map((f) => h('span', { class: 'tag' }, FLAG_TEXT[f] || f))),
         h('div', { class: 'event-when' }, O.formatDateSec(ev.occurred_at)),
         h('div', { class: 'event-detail' }, ev.reason + (where.length ? ' ' + where.join(', ') + '.' : '')),
         ev.link_url ? h('div', { class: 'event-link' }, ev.link_url) : null
@@ -229,6 +248,7 @@
           h('div', {}, h('dt', {}, 'First seen'), h('dd', {}, e.first_open_at ? O.timeAgo(e.first_open_at) : 'None yet')),
           h('div', {}, h('dt', {}, 'Last seen'), h('dd', {}, e.last_open_at ? O.timeAgo(e.last_open_at) : 'None yet'))
         ),
+        deviceNote(e),
         e.distinct_devices > 1 ? h('div', { class: 'note' }, icon('info', 16), h('span', {}, `Seen on ${e.distinct_devices} different devices. It may have been opened by more than one person, or forwarded.`)) : null,
         h('section', {},
           h('h3', { class: 'section-title' }, 'Recipients'),
@@ -296,8 +316,8 @@
         ),
         i.opened
           ? h('div', { class: 'charts' },
-              h('section', { class: 'chart-card' }, h('h3', {}, 'When people open'), h('p', { class: 'hint' }, `Most first opens happen around ${hourLabel(bestHour)}.`), bars(i.hours, (n, short) => (short ? String(n % 12 || 12) + (n < 12 ? 'a' : 'p') : hourLabel(n)), 3, `Opens by hour. Busiest around ${hourLabel(bestHour)}.`)),
-              h('section', { class: 'chart-card' }, h('h3', {}, 'Which days'), h('p', { class: 'hint' }, `${DAYS[bestDay]} is your best day.`), bars(i.weekdays, (n) => DAYS[n], 1, `Opens by weekday. Best day is ${DAYS[bestDay]}.`)))
+            h('section', { class: 'chart-card' }, h('h3', {}, 'When people open'), h('p', { class: 'hint' }, `Most first opens happen around ${hourLabel(bestHour)}.`), bars(i.hours, (n, short) => (short ? String(n % 12 || 12) + (n < 12 ? 'a' : 'p') : hourLabel(n)), 3, `Opens by hour. Busiest around ${hourLabel(bestHour)}.`)),
+            h('section', { class: 'chart-card' }, h('h3', {}, 'Which days'), h('p', { class: 'hint' }, `${DAYS[bestDay]} is your best day.`), bars(i.weekdays, (n) => DAYS[n], 1, `Opens by weekday. Best day is ${DAYS[bestDay]}.`)))
           : h('div', { class: 'note' }, icon('info', 16), h('span', {}, 'No opens yet. Charts appear when people start opening your emails.'))
       );
     } catch (e) { box.replaceChildren(h('div', { class: 'empty' }, h('h3', {}, "Can't load insights"), h('p', {}, e.message), h('button', { class: 'btn', type: 'button', onclick: loadInsights }, 'Try again'))); }
@@ -329,7 +349,7 @@
     const body = $('#accountBody');
     const modeSwitch = O.cloudAvailable
       ? h('div', { class: 'segmented', role: 'group', 'aria-label': 'Where your data lives' },
-          ['cloud', 'selfhost'].map((m) => h('button', { type: 'button', 'aria-pressed': String(s.mode === m), onclick: async () => { await O.saveSettings({ mode: m }); renderAccount(await O.getSettings()); flagSettings(); } }, m === 'cloud' ? 'Openly Cloud' : 'My own server')))
+        ['cloud', 'selfhost'].map((m) => h('button', { type: 'button', 'aria-pressed': String(s.mode === m), onclick: async () => { await O.saveSettings({ mode: m }); renderAccount(await O.getSettings()); flagSettings(); } }, m === 'cloud' ? 'Openly Cloud' : 'My own server')))
       : null;
     $('#accountHint').textContent = s.mode === 'cloud' ? 'Your emails and opens are stored in your private account.' : 'Openly talks to the tracking server you run. It needs a public https address so recipients can load the image.';
     body.replaceChildren(modeSwitch, s.mode === 'cloud' ? cloudPanel(s) : selfHostPanel(s));
@@ -377,22 +397,26 @@
     const draft = () => ({ ...s, mode: 'selfhost', backendUrl: O.normalizeBase(url.value), apiKey: key.value.trim() });
     const problem = (d) => (!d.backendUrl ? 'Enter your server address.' : !/^https?:\/\//i.test(d.backendUrl) ? 'The address must start with https://' : !d.apiKey ? 'Enter your API key.' : null);
     const show = h('button', { class: 'btn', type: 'button', onclick: (e) => { key.type = key.type === 'password' ? 'text' : 'password'; e.target.textContent = key.type === 'password' ? 'Show' : 'Hide'; } }, 'Show');
-    const save = h('button', { class: 'btn primary', type: 'button', onclick: async () => {
-      const d = draft(); const p = problem(d);
-      if (p) return say(msg, p, 'bad');
-      await O.saveSettings({ mode: 'selfhost', backendUrl: d.backendUrl, apiKey: d.apiKey });
-      say(msg, 'Saved.', 'ok'); toast('Settings saved'); flagSettings();
-    } }, 'Save changes');
-    const test = h('button', { class: 'btn', type: 'button', onclick: async () => {
-      const d = draft(); const p = problem(d);
-      if (p) return say(msg, p, 'bad');
-      say(msg, 'Testing…');
-      try {
-        const r = await O.api('/api/ping', { settings: d, timeout: 8000 });
-        const local = !/^https:\/\//i.test(d.backendUrl) || /^https:\/\/(localhost|127\.)/i.test(d.backendUrl);
-        say(msg, `Connected. Storing data in ${r.storage}.` + (local ? ' This address is not public, so recipients will not be able to load the tracking image.' : ''), local ? '' : 'ok');
-      } catch (e) { say(msg, e.message, 'bad'); }
-    } }, 'Test connection');
+    const save = h('button', {
+      class: 'btn primary', type: 'button', onclick: async () => {
+        const d = draft(); const p = problem(d);
+        if (p) return say(msg, p, 'bad');
+        await O.saveSettings({ mode: 'selfhost', backendUrl: d.backendUrl, apiKey: d.apiKey });
+        say(msg, 'Saved.', 'ok'); toast('Settings saved'); flagSettings();
+      }
+    }, 'Save changes');
+    const test = h('button', {
+      class: 'btn', type: 'button', onclick: async () => {
+        const d = draft(); const p = problem(d);
+        if (p) return say(msg, p, 'bad');
+        say(msg, 'Testing…');
+        try {
+          const r = await O.api('/api/ping', { settings: d, timeout: 8000 });
+          const local = !/^https:\/\//i.test(d.backendUrl) || /^https:\/\/(localhost|127\.)/i.test(d.backendUrl);
+          say(msg, `Connected. Storing data in ${r.storage}.` + (local ? ' This address is not public, so recipients will not be able to load the tracking image.' : ''), local ? '' : 'ok');
+        } catch (e) { say(msg, e.message, 'bad'); }
+      }
+    }, 'Test connection');
     return h('div', { class: 'selfhost' },
       h('div', { class: 'field' }, h('label', { for: 'backendUrl' }, 'Server address'), url),
       h('div', { class: 'field' }, h('label', { for: 'apiKey' }, 'API key'), h('div', { class: 'row-inline' }, key, show)),
