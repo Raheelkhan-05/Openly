@@ -163,6 +163,22 @@
     return true;
   }
   const removePixel = (root) => root.querySelectorAll('img[data-openly]').forEach((i) => i.remove());
+  // The Openly Gmail add-on (phone) may already have put a tracking image in this email. Use that one, with its
+  // token, instead of adding a second image, so one email never becomes two records.
+  function findForeignPixel(root) {
+    const body = root.querySelector(SEL.body);
+    if (!body) return null;
+    const base = backendOf(settings);
+    if (!base) return null;
+    for (const img of body.querySelectorAll('img[src*="/t/"]')) {
+      if (img.hasAttribute('data-openly')) continue;
+      const src = img.getAttribute('src') || '';
+      if (!src.startsWith(base + '/')) continue;
+      const m = TOKEN_IN_URL.exec(src);
+      if (m) return { img, token: m[1].toLowerCase() };
+    }
+    return null;
+  }
 
   /* ---------- link tracking: links go through your server, which sends people on ---------- */
   function rewriteLinks(root, token) {
@@ -194,7 +210,8 @@
       retire();
       return;
     }
-    const opens = opt.opens(root);
+    const foreign = findForeignPixel(root);
+    const opens = opt.opens(root) || !!foreign; // tapping "Add tracking" in the add-on is an explicit choice
     const clicks = opt.clicks(root);
     if (!opens) removePixel(root);
     if (!clicks) restoreLinks(root);
@@ -204,8 +221,16 @@
       toast(settings.mode === 'cloud' ? 'Sign in to Openly to track this email. It was sent without tracking.' : 'Openly is not set up yet, so this email was sent without tracking.', 'Open Openly', () => send({ type: 'open-settings' }));
       return;
     }
-    const token = (root.dataset.openlyToken ||= crypto.randomUUID());
-    if (opens && !ensurePixel(root, token)) return;
+    let token;
+    if (foreign) {
+      token = foreign.token;
+      root.dataset.openlyToken = token;
+      root.querySelectorAll('img[data-openly]').forEach((i) => { if (i !== foreign.img) i.remove(); });
+      foreign.img.setAttribute('data-openly', '');
+    } else {
+      token = (root.dataset.openlyToken ||= crypto.randomUUID());
+    }
+    if (opens && !foreign && !ensurePixel(root, token)) return;
     const links = clicks ? rewriteLinks(root, token) : [];
 
     const msg = { ...readMessage(root), links, remindAfterHours: opt.remind(root) };

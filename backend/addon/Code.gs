@@ -12,8 +12,8 @@
  * The Supabase anon key is public by design. Never put the service_role key here.
  */
 var BACKEND_URL = 'https://openly-gamma.vercel.app';
-var SUPABASE_URL = '';        // https://xxxx.supabase.co
-var SUPABASE_ANON_KEY = '';   // the public "anon" key
+var SUPABASE_URL = 'https://woddoqffqarbjrjuytsf.supabase.co';        // https://xxxx.supabase.co
+var SUPABASE_ANON_KEY = 'sb_publishable_XiLY546OmTkqd4kckMjF3g_CTv9GoF5';   // the public "anon" key
 
 var PROP_SESSION = 'session';
 var PROP_PENDING = 'pendingEmail';
@@ -136,7 +136,21 @@ function codeCard_(email) {
   return CardService.newCardBuilder().setHeader(CardService.newCardHeader().setTitle('Enter your code')).addSection(section).build();
 }
 
-function composeCard_() {
+// Recipients the card was opened with. Kept on the button too, in case Gmail does not hand them over on the tap.
+function metaParams_(meta) {
+  meta = meta || {};
+  return {
+    to: JSON.stringify(meta.toRecipients || []),
+    cc: JSON.stringify(meta.ccRecipients || []),
+    bcc: JSON.stringify(meta.bccRecipients || [])
+  };
+}
+function paramList_(e, name) {
+  var p = (e && e.commonEventObject && e.commonEventObject.parameters) || (e && e.parameters) || {};
+  try { return JSON.parse(p[name] || '[]'); } catch (err) { return []; }
+}
+
+function composeCard_(meta) {
   if (!cloudReady_()) {
     return CardService.newCardBuilder()
       .setHeader(CardService.newCardHeader().setTitle('Openly is not set up'))
@@ -148,23 +162,17 @@ function composeCard_() {
   if (!s) return signInCard_();
   var section = CardService.newCardSection()
     .addWidget(CardService.newTextParagraph().setText(
-      'Tap once to add the invisible tracking image to this email, then send it as usual. ' +
-      'Tracks opens only. It cannot tell your recipients apart.'))
-    .addWidget(CardService.newTextInput().setFieldName('label').setTitle('Name for your dashboard (optional)')
-      .setHint('Gmail does not share the subject with add-ons'))
-    .addWidget(CardService.newSelectionInput().setType(CardService.SelectionInputType.DROPDOWN)
-      .setFieldName('remind').setTitle('Remind me if not opened')
-      .addItem('Off', '0', true).addItem('In 1 day', '24', false).addItem('In 3 days', '72', false).addItem('In 1 week', '168', false))
+      'Write your email and add the recipients first, then tap Add tracking. That is all.'))
     .addWidget(CardService.newTextButton().setText('Add tracking').setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-      .setOnClickAction(CardService.newAction().setFunctionName('addTracking')))
+      .setOnClickAction(CardService.newAction().setFunctionName('addTracking').setParameters(metaParams_(meta))))
     .addWidget(CardService.newTextParagraph().setText('Signed in as ' + s.email))
     .addWidget(CardService.newTextButton().setText('Sign out')
       .setOnClickAction(CardService.newAction().setFunctionName('signOut')));
   return CardService.newCardBuilder().setHeader(CardService.newCardHeader().setTitle('Track with Openly')).addSection(section).build();
 }
 
-function onCompose() {
-  return composeCard_();
+function onCompose(e) {
+  return composeCard_(e && e.draftMetadata);
 }
 
 /* ---------- adding the tracking image ---------- */
@@ -176,10 +184,12 @@ function addTracking(e) {
   var access = accessToken_();
   if (!access) return notify_('Please sign in again.', refreshTo_(composeCard_()));
 
+  // Gmail does not share the subject with add-ons, so the dashboard shows these emails as "sent from phone".
   var meta = (e && e.draftMetadata) || {};
   var to = list_(meta.toRecipients), cc = list_(meta.ccRecipients), bcc = list_(meta.bccRecipients);
-  var label = formValue_(e, 'label');
-  var remind = Number(formValue_(e, 'remind')) || 0;
+  if (!to.length && !cc.length && !bcc.length) { to = list_(paramList_(e, 'to')); cc = list_(paramList_(e, 'cc')); bcc = list_(paramList_(e, 'bcc')); }
+  var label = '';
+  var remind = 0;
 
   // Tapping twice for the same draft must not make two different tracked emails.
   var signature = JSON.stringify([to, cc, bcc, label]);
