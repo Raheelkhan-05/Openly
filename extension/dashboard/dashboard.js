@@ -192,7 +192,7 @@
       tick(ev.kind === 'sender' ? 'none' : ev.kind === 'recipient' ? 'opened' : 'possible'),
       h('div', { class: 'event-body' },
         h('div', { class: 'event-title' }, title, ...ev.flags.map((f) => h('span', { class: 'tag' }, FLAG_TEXT[f] || f))),
-        h('div', { class: 'event-when' }, O.formatDate(ev.occurred_at)),
+        h('div', { class: 'event-when' }, O.formatDateSec(ev.occurred_at)),
         h('div', { class: 'event-detail' }, ev.reason + (where.length ? ' ' + where.join(', ') + '.' : '')),
         ev.link_url ? h('div', { class: 'event-link' }, ev.link_url) : null
       ),

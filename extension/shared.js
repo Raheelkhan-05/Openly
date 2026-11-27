@@ -145,6 +145,7 @@ globalThis.Openly = (() => {
     return new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
   }
   const formatDate = (iso) => new Date(iso).toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+  const formatDateSec = (iso) => new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit', second: '2-digit' });
   const formatTime = (iso) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
 
   /* ---------- tiny DOM helpers (pages only) ---------- */
@@ -207,6 +208,6 @@ globalThis.Openly = (() => {
   return {
     DEFAULTS, ApiError, cloudAvailable, getSettings, saveSettings, normalizeBase, backendOf, isConfigured,
     requestCode, verifyCode, signOut, api,
-    STATUS, CONFIDENCE, confidenceText, recipientsLabel, timeAgo, formatDate, formatTime, h, icon, tick,
+    STATUS, CONFIDENCE, confidenceText, recipientsLabel, timeAgo, formatDate, formatDateSec, formatTime, h, icon, tick,
   };
 })();

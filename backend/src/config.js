@@ -26,7 +26,7 @@ const config = {
     justSentMs: 15000, // an image load this soon after sending is uncertain
     clickJustSentMs: 8000, // so is a link click this soon after sending
     applePrefetchMs: 120000, // Apple Mail may preload images right after delivery
-    sameOpenMs: 10000, // image loads this close together count as one open
+    sameOpenMs: 60000, // image loads within a minute of each other count as one open (Gmail often loads twice)
     burstMs: 3000, // several different links hit within this window...
     burstLinks: 3, // ...by the same visitor look like a security scanner
   },

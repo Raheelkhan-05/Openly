@@ -156,9 +156,6 @@
       return;
     }
     const token = (root.dataset.openlyToken ||= crypto.randomUUID());
-    if (opens && root.querySelector(SEL.body)?.isContentEditable === false) {
-      toast('This email is in plain text mode, which cannot carry tracking. Turn off "Plain text mode" in the ⋮ More options menu of the compose window.');
-    }
     if (opens && !ensurePixel(root, token)) return;
     const links = clicks ? rewriteLinks(root, token) : [];
 
@@ -169,26 +166,72 @@
     chrome.runtime.sendMessage({ type: 'register', payload: { token, ...msg, sentAt: new Date().toISOString() } });
   }
 
+  /* ---------- plain text mode can't carry tracking, so Send is held back ---------- */
+  const isVisible = (el) => !!el && el.getClientRects().length > 0;
+  // In plain text mode Gmail swaps the rich editor for a plain text box.
+  function isPlainText(root) {
+    const rich = root.querySelector(SEL.body);
+    const box = [...root.querySelectorAll('textarea')].find(
+      (t) => isVisible(t) && (t.name === 'body' || t.classList.contains('Ak') || /body/i.test(t.getAttribute('aria-label') || ''))
+    );
+    return !!box && !isVisible(rich);
+  }
+  const needsRichText = (root) => (opt.opens(root) || opt.clicks(root)) && isConfigured(settings) && isPlainText(root);
+  const repaint = (root) => root.__openlyPaint?.();
+
+  function plainTextDialog(root) {
+    document.querySelector('.openly-modal')?.remove();
+    const close = () => el.remove();
+    const el = h('div', { class: 'openly-modal', role: 'alertdialog', 'aria-label': 'Plain text mode cannot be tracked' },
+      h('strong', {}, "Plain text mode can't be tracked"),
+      h('p', {}, 'Plain text emails cannot hold the tracking image or links. Turn off "Plain text mode" in the ⋮ More options menu of this window, then click Send.'),
+      h('div', { class: 'openly-actions' },
+        h('button', { type: 'button', class: 'primary', onclick: close }, 'OK, I will switch it'),
+        h('button', { type: 'button', onclick: () => {
+          root.dataset.openlyTrack = '0';
+          root.dataset.openlyClicks = '0';
+          repaint(root);
+          close();
+          toast('Tracking is off for this email. Click Send again to send it.');
+        } }, 'Send without tracking'))
+    );
+    document.body.append(el);
+    el.querySelector('button').focus();
+  }
+
   /* ---------- hooks: click on Send, or Ctrl/Cmd + Enter ---------- */
+  let blockedUntil = 0;
+  const stop = (e) => { e.preventDefault(); e.stopImmediatePropagation(); };
   function onPress(e) {
     const btn = e.target.closest?.(SEL.sendButton);
     if (!btn) return;
     const root = findCompose(btn);
-    if (root) beforeSend(root);
+    if (!root) return;
+    if (e.type !== 'mousedown' && Date.now() < blockedUntil) return stop(e); // finish cancelling the same press
+    if (needsRichText(root)) {
+      blockedUntil = Date.now() + 1500;
+      stop(e);
+      plainTextDialog(root);
+      return;
+    }
+    beforeSend(root);
   }
   document.addEventListener('mousedown', onPress, true);
+  document.addEventListener('mouseup', (e) => { if (Date.now() < blockedUntil && e.target.closest?.(SEL.sendButton)) stop(e); }, true);
   document.addEventListener('click', onPress, true);
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey)) return;
     const root = findCompose(e.target);
-    if (root) beforeSend(root);
+    if (!root) return;
+    if (needsRichText(root)) { stop(e); plainTextDialog(root); return; }
+    beforeSend(root);
   }, true);
 
   /* ---------- the Track button and its small menu ---------- */
   let menu = null;
   const closeMenu = () => { menu?.remove(); menu = null; };
   document.addEventListener('mousedown', (e) => { if (menu && !menu.contains(e.target) && !e.target.closest('.openly-toggle')) closeMenu(); }, true);
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); }, true);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeMenu(); document.querySelector('.openly-modal')?.remove(); } }, true);
 
   function openMenu(root, anchor, repaint) {
     closeMenu();
@@ -217,12 +260,18 @@
   function decorate(root) {
     const bar = root.querySelector(SEL.bottomBar);
     if (!bar || bar.querySelector('.openly-toggle')) return;
-    const btn = h('button', { type: 'button', class: 'openly-toggle', 'aria-haspopup': 'dialog', title: 'Openly tracking options' }, h('span', { class: 'openly-dot' }), h('span', {}, 'Track'));
+    const label = h('span', {}, 'Track');
+    const btn = h('button', { type: 'button', class: 'openly-toggle', 'aria-haspopup': 'dialog', title: 'Openly tracking options' }, h('span', { class: 'openly-dot' }), label);
     const paint = () => {
       const on = opt.opens(root) || opt.clicks(root);
+      const plain = on && isConfigured(settings) && isPlainText(root);
       btn.setAttribute('aria-pressed', String(on));
-      btn.classList.toggle('on', on);
+      btn.classList.toggle('on', on && !plain);
+      btn.classList.toggle('warn', plain);
+      label.textContent = plain ? 'Plain text' : 'Track';
+      btn.title = plain ? "Plain text mode can't be tracked. Turn it off in the ⋮ More options menu." : 'Openly tracking options';
     };
+    root.__openlyPaint = paint;
     btn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -252,7 +301,7 @@
     queued = false;
     document.querySelectorAll(SEL.sendButton).forEach((btn) => {
       const root = findCompose(btn);
-      if (root) decorate(root);
+      if (root) { decorate(root); repaint(root); }
     });
     scanForOwnViews();
   }

@@ -59,6 +59,15 @@ test('a normal load is an open; a repeat right after is the same open', async ()
   server.close();
 });
 
+test('the tracking address counts with or without .gif on the end', async () => {
+  const { server, register, get, url } = await boot();
+  const t = uuid();
+  await register(t);
+  await fetch(`${url}/t/${t}`, { headers: { 'user-agent': CHROME } });
+  assert.equal((await get(t)).status, 'opened');
+  server.close();
+});
+
 test('unknown tokens are ignored', async () => {
   const { server, store, hit } = await boot();
   await hit(uuid());
