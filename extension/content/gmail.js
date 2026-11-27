@@ -41,11 +41,19 @@
   };
 
   /* ---------- reading the compose window ---------- */
+  // Climb from the Send button until we reach the whole compose window (header with subject
+  // and recipients included), but stop before reaching something that holds a second compose.
   function findCompose(from) {
+    let best = null;
     for (let n = from; n && n !== document.body; n = n.parentElement) {
-      if (n.querySelector && n.querySelector(SEL.body)) return n;
+      if (!n.querySelectorAll) continue;
+      const bodies = n.querySelectorAll(SEL.body).length;
+      if (bodies === 0) continue;
+      if (bodies > 1) break;
+      best = n;
+      if (n.querySelector(SEL.subject) || n.querySelector('[name="to"]')) break;
     }
-    return null;
+    return best;
   }
   function emailsIn(root, name) {
     const found = new Set();
@@ -57,16 +65,29 @@
     });
     return [...found];
   }
+  // Fallback: recipient chips anywhere in the compose window (skips the body and your own address).
+  function chipEmails(root) {
+    const me = (document.title.match(EMAIL) || [])[0]?.toLowerCase();
+    const found = new Set();
+    root.querySelectorAll('[email], [data-hovercard-id*="@"]').forEach((el) => {
+      if (el.closest(SEL.body) || el.closest('[name="from"]')) return;
+      for (const raw of [el.getAttribute('email'), el.getAttribute('data-hovercard-id')]) {
+        (raw || '').match(EMAIL)?.forEach((e) => { if (e.toLowerCase() !== me) found.add(e.toLowerCase()); });
+      }
+    });
+    return [...found];
+  }
   function readMessage(root) {
-    return {
-      to: emailsIn(root, 'to'),
-      cc: emailsIn(root, 'cc'),
-      bcc: emailsIn(root, 'bcc'),
-      subject:
-        root.querySelector(SEL.subject)?.value?.trim() ||
-        document.querySelector(SEL.threadSubject)?.textContent?.trim() ||
-        '',
-    };
+    let to = emailsIn(root, 'to');
+    const cc = emailsIn(root, 'cc');
+    const bcc = emailsIn(root, 'bcc');
+    if (!to.length && !cc.length && !bcc.length) to = chipEmails(root);
+    const subject =
+      root.querySelector(SEL.subject)?.value?.trim() ||
+      document.querySelector('[role="dialog"] ' + SEL.subject)?.value?.trim() ||
+      document.querySelector(SEL.threadSubject)?.textContent?.trim() ||
+      '';
+    return { to, cc, bcc, subject };
   }
 
   /* ---------- the tracking image ---------- */
