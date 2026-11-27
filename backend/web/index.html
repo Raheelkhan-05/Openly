@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Openly</title>
+  <meta name="theme-color" content="#0B8F6A">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/icon48.png">
+  <link rel="apple-touch-icon" href="icons/icon128.png">
+  <link rel="stylesheet" href="base.css">
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+<div class="app">
+  <nav class="rail" aria-label="Main">
+    <div class="brand"><span class="brand-mark" id="brandMark"></span><span class="brand-name">Openly</span></div>
+    <button class="nav" data-nav="emails" type="button"><span class="nav-icon" data-icon="mail"></span><span>Emails</span></button>
+    <button class="nav" data-nav="insights" type="button"><span class="nav-icon" data-icon="chart"></span><span>Insights</span></button>
+    <button class="nav" data-nav="settings" type="button"><span class="nav-icon" data-icon="settings"></span><span>Settings</span><span class="nav-flag" id="settingsFlag" hidden></span></button>
+  </nav>
+
+  <main class="main">
+    <section id="view-emails" class="view">
+      <header class="topbar">
+        <h1>Tracked emails</h1>
+        <button class="btn icon-btn ghost" id="refreshBtn" type="button" aria-label="Refresh" title="Refresh"></button>
+      </header>
+      <div class="stats" id="stats" role="group" aria-label="Filter by status"></div>
+      <div class="split" id="split" data-mode="list">
+        <div class="list-pane">
+          <label class="search"><span data-icon="search"></span><input class="search-input" id="search" type="search" placeholder="Search subject or recipient" autocomplete="off"></label>
+          <ul class="list" id="list"></ul>
+        </div>
+        <div class="detail-pane" id="detail"></div>
+      </div>
+    </section>
+
+    <section id="view-insights" class="view" hidden>
+      <header class="topbar"><h1>Insights</h1></header>
+      <div id="insights"></div>
+    </section>
+
+    <section id="view-settings" class="view settings" hidden>
+      <header class="topbar"><h1>Settings</h1></header>
+
+      <div class="group">
+        <div class="group-head"><h2>Account</h2><p class="hint" id="accountHint"></p></div>
+        <div class="group-body" id="accountBody"></div>
+        <p class="hint ext-only" id="webLink" hidden></p>
+      </div>
+
+      <div class="group ext-only">
+        <div class="group-head"><h2>Tracking</h2><p class="hint">Defaults for new emails. You can change them for one email from the Track button in Gmail.</p></div>
+        <div class="group-body">
+          <label class="switch"><input type="checkbox" id="trackByDefault"><span class="track"></span><span class="copy"><span>Track opens</span><small>Adds an invisible image to the email.</small></span></label>
+          <label class="switch"><input type="checkbox" id="trackClicksByDefault"><span class="track"></span><span class="copy"><span>Track link clicks</span><small>A click confirms a real person even when images are blocked. Links go through your server, and a few spam filters dislike that.</small></span></label>
+          <div class="field"><label for="remindAfterHours">Remind me if an email isn't opened</label>
+            <select class="input" id="remindAfterHours"><option value="0">Never</option><option value="24">After 1 day</option><option value="72">After 3 days</option><option value="168">After 1 week</option></select>
+          </div>
+        </div>
+      </div>
+
+      <div class="group ext-only">
+        <div class="group-head"><h2>Notifications</h2></div>
+        <div class="group-body">
+          <label class="switch"><input type="checkbox" id="notifyOpens"><span class="track"></span><span class="copy"><span>First open</span><small>A Chrome notification the first time an email is opened.</small></span></label>
+          <label class="switch"><input type="checkbox" id="notifyClicks"><span class="track"></span><span class="copy"><span>Link clicks</span><small>When someone clicks a tracked link.</small></span></label>
+          <label class="switch"><input type="checkbox" id="notifyRepeat"><span class="track"></span><span class="copy"><span>Repeat opens</span><small>Also notify when the same email is opened again.</small></span></label>
+          <label class="switch"><input type="checkbox" id="notifyPossible"><span class="track"></span><span class="copy"><span>Possible opens</span><small>Also notify for uncertain activity, such as scanners.</small></span></label>
+          <div class="actions"><button class="btn" id="testNotif" type="button">Send a test notification</button></div>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="group-head"><h2>Your data</h2><p class="hint">Only you can see it. Nothing is sold or shared.</p></div>
+        <div class="group-body">
+          <div class="actions">
+            <button class="btn" id="exportBtn" type="button"></button>
+            <button class="btn danger" id="wipeBtn" type="button">Delete all my data</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="group-head"><h2>What Openly can and can't tell you</h2></div>
+        <div class="group-body prose">
+          <p>An open means the tracking image was loaded. It doesn't prove anyone read the message. Openly shows how sure it is.</p>
+          <ul>
+            <li>High: a link was clicked, or a real mail app loaded the image.</li>
+            <li>Medium: Gmail or Yahoo loaded the image for the reader. If you checked your sent mail on your phone, pause counting from the toolbar popup or use "That was me".</li>
+            <li>Low: only scanners or preloads so far, which never count as a read.</li>
+            <li>When one email goes to several people, an open can't be matched to a person.</li>
+            <li>Forwarded emails can be opened by people you didn't write to. Openly shows when it sees more than one device.</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="group">
+        <div class="group-head"><h2>About</h2></div>
+        <div class="group-body about" id="about"></div>
+      </div>
+    </section>
+  </main>
+</div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<script src="chrome-shim.js"></script>
+<script src="config.js"></script>
+<script src="brand.js"></script>
+<script src="shared.js"></script>
+<script src="dashboard.js"></script>
+</body>
+</html>

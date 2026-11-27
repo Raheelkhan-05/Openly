@@ -64,3 +64,15 @@ and uses it instead of adding a second one, so you get one record with the real 
 
 The add-on home card shows when the last check ran and why it could not schedule or read Gmail, if it could not.
 Scheduled checks can run a few minutes after their time: Google does not run one-off triggers to the second.
+
+
+## Seeing who opened an email, and the dashboard on your phone
+
+- **Web dashboard:** `https://YOUR-SERVER/app/` is the same dashboard as the extension, in any browser. Sign in once with the
+  same email (6-digit code). On a phone, use the browser menu > Add to Home screen to keep it like an app.
+- **Summary on the email:** open a tracked sent email in Gmail on a computer and a bar above the message shows opened or not,
+  how many times, when and where, with a Details button. In the Gmail app, open the email and then the Openly add-on: it shows
+  the same summary and an Open dashboard button.
+- **Find in Gmail:** every email in the dashboard has a Find in Gmail button that searches your Sent mail by recipient, subject and date.
+
+After changing `extension/dashboard`, `extension/ui` or `extension/shared.js`, run `npm run build:web` and redeploy the backend.

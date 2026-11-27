@@ -4,7 +4,7 @@
   const { h, icon, tick, STATUS } = O;
   const $ = (s, r = document) => r.querySelector(s);
 
-  const state = { emails: [], filter: 'all', q: '', selected: null, detail: null, detailError: null, loaded: false, error: null };
+  const state = { emails: [], filter: 'all', q: '', selected: null, detail: null, detailError: null, loaded: false, error: null, account: '' };
   let detailSeq = 0;
   const confirmTimers = new WeakMap();
 
@@ -63,6 +63,7 @@
   /* ---------- loading ---------- */
   async function refresh({ silent = false } = {}) {
     const s = await O.getSettings();
+    state.account = s.accountEmail || '';
     if (!O.isConfigured(s)) {
       state.loaded = true;
       state.error = { code: 'not_configured', message: s.mode === 'cloud' ? 'Sign in to start tracking.' : 'Add your server address and API key.' };
@@ -236,7 +237,9 @@
     pane.replaceChildren(
       h('article', { class: 'detail' },
         h('button', { class: 'btn ghost back', type: 'button', onclick: deselect }, icon('back'), 'All emails'),
-        h('header', { class: 'd-head' }, h('h2', {}, subjectOf(e)), h('p', {}, 'Sent ' + O.formatDate(e.sent_at))),
+        h('header', { class: 'd-head' }, h('h2', {}, subjectOf(e)), h('p', {}, 'Sent ' + O.formatDate(e.sent_at)),
+          h('div', { class: 'd-actions' },
+            h('a', { class: 'btn small', href: O.gmailSearchUrl(e, state.account), target: '_blank', rel: 'noopener', title: 'Searches your Gmail for this email' }, icon('mail', 16), 'Find in Gmail'))),
         h('div', { class: 'banner', 'data-tone': st.tone },
           tick(e.status, 24),
           h('div', {}, h('strong', {}, st.label), h('p', {}, st.help),
@@ -332,6 +335,10 @@
     toggles.forEach((k) => { $('#' + k).checked = !!s[k]; });
     $('#remindAfterHours').value = String(s.remindAfterHours || 0);
     renderAccount(s);
+    const web = $('#webLink');
+    const url = O.webDashboardUrl(s);
+    web.hidden = !(url && s.mode === 'cloud');
+    if (!web.hidden) web.replaceChildren('On your phone, open ', h('a', { href: url, target: '_blank', rel: 'noopener' }, url), ' and sign in with the same email.');
     $('#exportBtn').replaceChildren(icon('download', 16), 'Export my data');
     const b = globalThis.OpenlyBrand || {};
     $('#about').replaceChildren(

@@ -22,7 +22,7 @@ Openly tells you when the emails you send from Gmail are opened or clicked, **an
 | Folder | What it is |
 |---|---|
 | `extension/` | Chrome extension (Manifest V3). No build step |
-| `backend/` | Node.js + Express server (runs on Vercel, or any always-on host) |
+| `backend/` | Node.js + Express server (runs on Vercel, or any always-on host). Also serves the web dashboard at `/app/` (built into `backend/web` by `npm run build:web`) |
 | `supabase/schema.sql` | The database tables |
 | `tools/brand.js` | Signs the code and hides your encrypted authorship claim |
 | `docs/` | Deploy guide, store listing, privacy policy template |

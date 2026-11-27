@@ -9,6 +9,7 @@
     "brand:init": "node tools/brand.js init",
     "brand:sign": "node tools/brand.js sign",
     "brand:verify": "node tools/brand.js verify",
-    "brand:reveal": "node tools/brand.js reveal"
+    "brand:reveal": "node tools/brand.js reveal",
+    "build:web": "node tools/build-web.js"
   }
 }

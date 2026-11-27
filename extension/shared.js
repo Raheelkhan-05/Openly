@@ -130,12 +130,32 @@ globalThis.Openly = (() => {
     return '';
   }
 
+  // Everyone the email went to, once each (an address in both To and Cc is one person).
+  const everyone = (e) => [...new Set([...(e.to_recipients || []), ...(e.cc_recipients || []), ...(e.bcc_recipients || [])])];
   function recipientsLabel(e) {
-    const all = [...(e.to_recipients || []), ...(e.cc_recipients || []), ...(e.bcc_recipients || [])];
+    const all = everyone(e);
     if (!all.length) return 'Recipients not detected';
     const first = (e.to_recipients && e.to_recipients[0]) || all[0];
     return all.length > 1 ? `${first} and ${all.length - 1} more` : first;
   }
+  /* ---------- finding an email in Gmail, and the web dashboard ---------- */
+  const ymd = (ms) => { const d = new Date(ms); return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()}`; };
+  // A Gmail search that lands on this email: sent mail, to the first recipient, with the subject and a few days around
+  // the send date. Phone emails whose subject is still unknown are found by recipient and date alone.
+  function gmailSearchUrl(e, account) {
+    const parts = ['in:sent'];
+    const first = everyone(e)[0];
+    if (first) parts.push('to:' + first);
+    const subject = (e.subject || '').replace(/["\\]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (subject && !/^\(.*\)$/.test(subject)) parts.push(`subject:"${subject}"`);
+    const t = Date.parse(e.sent_at);
+    if (Number.isFinite(t)) parts.push(`after:${ymd(t - 864e5)}`, `before:${ymd(t + 2 * 864e5)}`);
+    const base = account && account.includes('@') ? `https://mail.google.com/mail/?authuser=${encodeURIComponent(account)}` : 'https://mail.google.com/mail/u/0/';
+    return `${base}#search/${encodeURIComponent(parts.join(' '))}`;
+  }
+  // The dashboard that opens in any browser, phone included (served by your Openly server).
+  const webDashboardUrl = (s, hash = '') => (s.mode === 'cloud' || backendOf(s) ? backendOf(s) + '/app/' + (hash ? '#' + hash : '') : '');
+
   function timeAgo(iso) {
     const s = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
     if (s < 45) return 'just now';
@@ -208,6 +228,6 @@ globalThis.Openly = (() => {
   return {
     DEFAULTS, ApiError, cloudAvailable, getSettings, saveSettings, normalizeBase, backendOf, isConfigured,
     requestCode, verifyCode, signOut, api,
-    STATUS, CONFIDENCE, confidenceText, recipientsLabel, timeAgo, formatDate, formatDateSec, formatTime, h, icon, tick,
+    STATUS, CONFIDENCE, confidenceText, recipientsLabel, everyone, gmailSearchUrl, webDashboardUrl, timeAgo, formatDate, formatDateSec, formatTime, h, icon, tick,
   };
 })();

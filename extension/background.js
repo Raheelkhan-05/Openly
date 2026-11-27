@@ -185,6 +185,18 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     sendResponse({ ok: true });
     return;
   }
+  if (msg?.type === 'summary' && UUID_RE.test(String(msg.token))) {
+    api(`/api/emails/${msg.token.toLowerCase()}`).then(
+      (r) => sendResponse({ ok: true, email: r.email }),
+      (e) => sendResponse({ ok: false, status: e.status || 0, message: e.message })
+    );
+    return true;
+  }
+  if (msg?.type === 'open-dashboard' && UUID_RE.test(String(msg.token))) {
+    chrome.tabs.create({ url: dashboardUrl(`#email=${msg.token.toLowerCase()}`) });
+    sendResponse({ ok: true });
+    return;
+  }
   if (msg?.type === 'open-settings') {
     chrome.tabs.create({ url: dashboardUrl('#settings') });
     sendResponse({ ok: true });

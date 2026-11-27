@@ -438,6 +438,61 @@
     bar.append(btn);
   }
 
+  /* ---------- the summary shown on your own sent email ---------- */
+  // Above the message body: opened or not, how many times, when, where, and a button to the dashboard. It only appears
+  // on emails you tracked (the server answers "unknown" for anyone else's), and it never says WHO opened it.
+  const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+  function summaryText(e) {
+    const people = Openly.everyone(e).length;
+    const engaged = e.open_count + e.click_count > 0;
+    let main;
+    if (engaged) {
+      const bits = [];
+      if (e.open_count) bits.push(`Opened ${plural(e.open_count, 'time', 'times')}`);
+      if (e.click_count) bits.push(`${plural(e.click_count, 'link click', 'link clicks')}`);
+      main = bits.join(', ');
+      if (e.last_open_at) main += ` · last ${Openly.timeAgo(e.last_open_at)}`;
+      if (e.last_device?.label) main += ` · ${e.last_device.label}`;
+    } else if (e.status === 'possible') {
+      main = 'Possible open, not counted as read (a scanner or preview)';
+    } else {
+      main = 'Not opened yet';
+    }
+    if (people > 1) main += ` · sent to ${people} people, so it can't tell who opened it`;
+    return main;
+  }
+  async function fillSummary(el, token) {
+    const text = el.querySelector('.openly-sum-text');
+    const r = await send({ type: 'summary', token });
+    if (!el.isConnected) return;
+    if (!r) { el.remove(); return; }
+    if (!r.ok) {
+      if (r.status === 404) { el.remove(); return; } // not one of your tracked emails
+      text.textContent = r.status === 401 ? 'Openly: sign in to see this email\'s activity.' : 'Openly: could not load the summary.';
+      return;
+    }
+    const e = r.email;
+    el.dataset.status = e.status;
+    el.querySelector('.openly-sum-tick').replaceChildren(Openly.tick(e.status, 16));
+    text.textContent = summaryText(e);
+    el.title = (Openly.STATUS[e.status]?.help || '') + (e.confidence ? ` Confidence: ${Openly.CONFIDENCE[e.confidence]}.` : '');
+  }
+  function mountSummary(img, token) {
+    const base = backendOf(settings);
+    if (!base || !pixelToken(img, base)) return; // only images from your own Openly server
+    const host = img.closest('.ii') || img.closest('.a3s');
+    if (!host?.parentElement) return;
+    if (host.parentElement.querySelector(`.openly-summary[data-token="${token}"]`)) return;
+    const el = h('div', { class: 'openly-summary', 'data-token': token, role: 'status' },
+      h('span', { class: 'openly-sum-tick' }),
+      h('span', { class: 'openly-sum-text' }, 'Openly: checking…'),
+      h('button', { type: 'button', class: 'openly-sum-btn', onclick: () => send({ type: 'open-dashboard', token }) }, 'Details'),
+      h('button', { type: 'button', class: 'openly-sum-btn', onclick: () => { el.querySelector('.openly-sum-text').textContent = 'Openly: checking…'; fillSummary(el, token); } }, 'Refresh'));
+    host.parentElement.insertBefore(el, host);
+    // A moment later, so Gmail's own load of the image while you view the email is already marked as yours.
+    setTimeout(() => fillSummary(el, token), 3500);
+  }
+
   /* ---------- noticing when you look at your own sent email ---------- */
   const lastPing = new Map();
   function scanForOwnViews() {
@@ -447,6 +502,7 @@
       if (!m) return;
       img.dataset.openlySeen = '1';
       const token = m[1].toLowerCase();
+      mountSummary(img, token);
       if (Date.now() - (lastPing.get(token) || 0) < 20000) return;
       lastPing.set(token, Date.now());
       send({ type: 'selfview', token });

@@ -170,3 +170,8 @@ select.input { appearance: none; padding-right: 32px; background: var(--surface)
   .event { grid-template-columns: 24px minmax(0, 1fr); }
   .event .btn.small { grid-column: 2; justify-self: start; }
 }
+
+/* Parts that only make sense inside the Chrome extension are hidden on the web dashboard. */
+html[data-web] .ext-only { display: none !important; }
+.d-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.d-actions a.btn { text-decoration: none; display: inline-flex; align-items: center; gap: 6px; }

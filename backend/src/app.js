@@ -1,4 +1,5 @@
 const crypto = require('crypto');
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
@@ -84,6 +85,18 @@ function createApp({ store, config, verifyToken }) {
     });
     return true;
   }
+
+  /* ---- the web dashboard: the same dashboard as the extension, for any browser (phones too) ---- */
+  // Built from extension/dashboard by tools/build-web.js. It signs in with the same emailed code and talks to /api.
+  app.get(/^\/app$/, (req, res) => res.redirect(301, '/app/')); // exact /app only, so /app/ is not redirected to itself
+  app.use('/app', (req, res, next) => {
+    res.set({ 'X-Frame-Options': 'DENY', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' });
+    next();
+  }, express.static(path.join(__dirname, '..', 'web'), {
+    index: 'index.html',
+    dotfiles: 'ignore',
+    setHeaders: (res, file) => res.set('Cache-Control', /\.html$/.test(file) ? 'no-cache' : 'public, max-age=300'),
+  }));
 
   /* ---- public: the tracking image and the link redirect ---- */
   const publicLimiter = rateLimit({ windowMs: 60_000, limit: 300, standardHeaders: false, legacyHeaders: false, handler: (req, res) => (req.path.startsWith('/r/') ? res.status(429).type('text').send('Too many requests') : sendGif(res)) });

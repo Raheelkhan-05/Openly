@@ -142,6 +142,8 @@ function onHomepage() {
   var status = props_().getProperty(PROP_STATUS);
   if (s && status) section.addWidget(CardService.newTextParagraph().setText('Last update check ' + status));
   if (s) {
+    section.addWidget(CardService.newTextButton().setText('Open dashboard')
+      .setOpenLink(CardService.newOpenLink().setUrl(dashboardUrl_()).setOpenAs(CardService.OpenAs.FULL_SIZE)));
     section.addWidget(CardService.newTextButton().setText('Update phone emails now')
       .setOnClickAction(CardService.newAction().setFunctionName('syncNow')));
   }
@@ -365,13 +367,82 @@ function syncIfWaiting_() {
   props_().setProperty(PROP_SYNC_AT, String(Date.now()));
   try { syncPhoneEmails(); } catch (err) { /* try again next time */ }
 }
-// Runs when you open an email in Gmail.
-function onMessageOpen() {
+// Runs when you open an email in Gmail (the add-on panel on the phone, or the side panel on a computer).
+// On an email you sent with Openly tracking, it shows who has opened it: how many times, when, and a link to the dashboard.
+var PIXEL_RE = /\/t\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.gif/i;
+
+function dashboardUrl_(token) { return backend_() + '/app/' + (token ? '#email=' + token : ''); }
+
+function ago_(iso) {
+  var sec = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
+  if (sec < 45) return 'just now';
+  if (sec < 3600) return Math.round(sec / 60) + ' min ago';
+  if (sec < 86400) return Math.round(sec / 3600) + ' h ago';
+  return Math.round(sec / 86400) + ' d ago';
+}
+function plural_(n, one, many) { return n + ' ' + (n === 1 ? one : many); }
+
+function trackedTokenOf_(e) {
+  var g = (e && e.gmail) || {};
+  var meta = (e && e.messageMetadata) || {};
+  var id = g.messageId || meta.messageId;
+  var at = g.accessToken || meta.accessToken;
+  if (!id) return null;
+  try {
+    if (at) GmailApp.setCurrentMessageAccessToken(at);
+    var body = GmailApp.getMessageById(id).getBody();
+    var m = PIXEL_RE.exec(body);
+    return m && body.indexOf(backend_() + '/t/' + m[1]) !== -1 ? m[1].toLowerCase() : null;
+  } catch (err) {
+    console.error('Could not read the opened email: ' + err);
+    return null;
+  }
+}
+
+function summaryCard_(email, token) {
+  var engaged = email.open_count + email.click_count > 0;
+  var main;
+  if (engaged) {
+    main = email.open_count ? 'Opened ' + plural_(email.open_count, 'time', 'times') : '';
+    if (email.click_count) main += (main ? ', ' : '') + plural_(email.click_count, 'link click', 'link clicks');
+    if (email.last_open_at) main += '\nLast seen ' + ago_(email.last_open_at);
+    if (email.last_device && email.last_device.label) main += ' (' + email.last_device.label + ')';
+  } else if (email.status === 'possible') {
+    main = 'Possible open. A scanner or preview loaded it, so it is not counted as read.';
+  } else {
+    main = 'Not opened yet.';
+  }
+  var section = CardService.newCardSection()
+    .addWidget(CardService.newDecoratedText().setTopLabel('Tracked email').setText(main).setWrapText(true));
+  if (email.recipient_count > 1) {
+    section.addWidget(CardService.newTextParagraph().setText(
+      'Sent to ' + email.recipient_count + ' people with one tracking image, so Openly cannot tell who opened it.'));
+  }
+  section.addWidget(CardService.newTextButton().setText('Open dashboard')
+    .setOpenLink(CardService.newOpenLink().setUrl(dashboardUrl_(token)).setOpenAs(CardService.OpenAs.FULL_SIZE)));
+  return CardService.newCardBuilder()
+    .setHeader(CardService.newCardHeader().setTitle('Openly').setSubtitle(email.subject || ''))
+    .addSection(section).build();
+}
+
+function onMessageOpen(e) {
   syncIfWaiting_();
+  var token = getSession_() ? trackedTokenOf_(e) : null;
+  if (token) {
+    var access = accessToken_();
+    if (access) {
+      try {
+        var res = UrlFetchApp.fetch(backend_() + '/api/emails/' + token, { headers: { authorization: 'Bearer ' + access }, muteHttpExceptions: true });
+        if (res.getResponseCode() === 200) return summaryCard_(JSON.parse(res.getContentText()).email, token);
+      } catch (err) { console.error('Could not load the summary: ' + err); }
+    }
+  }
   return CardService.newCardBuilder()
     .setHeader(CardService.newCardHeader().setTitle('Openly'))
-    .addSection(CardService.newCardSection().addWidget(CardService.newTextParagraph().setText(
-      'Write an email and open \"Track with Openly\" from the compose menu to track it.')))
+    .addSection(CardService.newCardSection()
+      .addWidget(CardService.newTextParagraph().setText('This email is not tracked by you. To track one, open "Track with Openly" from the compose menu.'))
+      .addWidget(CardService.newTextButton().setText('Open dashboard')
+        .setOpenLink(CardService.newOpenLink().setUrl(dashboardUrl_()).setOpenAs(CardService.OpenAs.FULL_SIZE))))
     .build();
 }
 

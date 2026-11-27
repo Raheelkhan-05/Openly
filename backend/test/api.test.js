@@ -314,3 +314,26 @@ test('details cannot touch another person\'s email', async () => {
   assert.equal(r.status, 404);
   server.close();
 });
+
+test('web dashboard is served and the redirect keeps working', async () => {
+  const { server, url } = await boot();
+  const page = await fetch(url + '/app/');
+  assert.equal(page.status, 200);
+  assert.match(await page.text(), /chrome-shim\.js/);
+  const js = await fetch(url + '/app/shared.js');
+  assert.equal(js.status, 200);
+  assert.equal((await fetch(url + '/app', { redirect: 'manual' })).status, 301);
+  server.close();
+});
+
+test('To, Cc and Bcc are all kept, and one person in two lists counts once', async () => {
+  const { server, register, get } = await boot();
+  const t = uuid();
+  await register(t, { to: ['a@x.com', 'b@x.com'], cc: ['c@x.com', 'a@x.com'], bcc: ['d@x.com'] });
+  const e = await get(t);
+  assert.deepEqual(e.to_recipients, ['a@x.com', 'b@x.com']);
+  assert.deepEqual(e.cc_recipients, ['c@x.com', 'a@x.com']);
+  assert.deepEqual(e.bcc_recipients, ['d@x.com']);
+  assert.equal(e.recipient_count, 4);
+  server.close();
+});

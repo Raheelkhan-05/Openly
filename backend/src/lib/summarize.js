@@ -125,7 +125,8 @@ function summarize(email, events, views, mutes, rules) {
   });
 
   const engaged = openCount + clickCount > 0;
-  const recipientCount = (email.to_recipients || []).length + (email.cc_recipients || []).length + (email.bcc_recipients || []).length;
+  // One person in both To and Cc is still one person.
+  const recipientCount = new Set([...(email.to_recipients || []), ...(email.cc_recipients || []), ...(email.bcc_recipients || [])]).size;
 
   return {
     token: email.token,
