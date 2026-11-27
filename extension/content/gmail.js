@@ -5,6 +5,41 @@
 
   const { h, getSettings, isConfigured, backendOf } = Openly;
 
+  /* ---------- extension context guard ----------
+     When the extension is reloaded or updated, Gmail tabs that were already open keep running this old copy
+     of the script, but chrome.runtime and chrome.storage stop working ("Cannot read properties of undefined
+     (reading 'sendMessage')"). Every call to the extension goes through these helpers, and once the context
+     is gone the script switches itself off quietly and asks for a refresh instead of throwing errors. */
+  const alive = () => {
+    try { return !!(globalThis.chrome && chrome.runtime && chrome.runtime.id); } catch { return false; }
+  };
+  let dead = false;
+  let observer = null;
+  const listeners = [];
+  const on = (type, fn, opts) => { document.addEventListener(type, fn, opts); listeners.push([type, fn, opts]); };
+  function retire() {
+    if (dead) return;
+    dead = true;
+    try { observer?.disconnect(); } catch { /* ignore */ }
+    listeners.forEach(([type, fn, opts]) => document.removeEventListener(type, fn, opts));
+    document.querySelectorAll('.openly-toggle, .openly-menu, .openly-modal').forEach((el) => el.remove());
+    window.__openlyLoaded = false;
+    try { toast('Openly was updated or reloaded. Refresh this Gmail tab to keep tracking your emails.'); } catch { /* ignore */ }
+  }
+  // Sends a message to the background worker. Never throws and never leaves an unhandled rejection.
+  function send(msg) {
+    if (!alive()) { retire(); return Promise.resolve(null); }
+    try {
+      return Promise.resolve(chrome.runtime.sendMessage(msg)).catch((e) => {
+        if (/context invalidated|receiving end/i.test(e?.message || '')) retire();
+        return null;
+      });
+    } catch {
+      retire();
+      return Promise.resolve(null);
+    }
+  }
+
   // Gmail's markup changes now and then. Everything that depends on it lives in this block.
   const SEL = {
     sendButton: '.aoO[role="button"], [role="button"][data-tooltip^="Send"]',
@@ -18,9 +53,14 @@
   const REMIND = [['0', 'Off'], ['24', 'In 1 day'], ['72', 'In 3 days'], ['168', 'In 1 week']];
 
   let settings = { ...Openly.DEFAULTS };
-  const loadSettings = () => getSettings().then((s) => { settings = s; });
+  const loadSettings = () => {
+    if (!alive()) { retire(); return Promise.resolve(); }
+    return getSettings().then((s) => { settings = s; }).catch(() => { if (!alive()) retire(); });
+  };
   loadSettings();
-  chrome.storage.onChanged.addListener((c, area) => { if (area === 'local' && c.settings) loadSettings(); });
+  try {
+    chrome.storage.onChanged.addListener((c, area) => { if (!dead && area === 'local' && c.settings) loadSettings(); });
+  } catch { retire(); }
 
   /* ---------- small notice ---------- */
   let toastTimer;
@@ -145,6 +185,14 @@
   }
 
   function beforeSend(root) {
+    if (dead) return;
+    if (!alive()) {
+      // The extension was reloaded: leave the email clean, so it has no tracking links that would go nowhere.
+      removePixel(root);
+      restoreLinks(root);
+      retire();
+      return;
+    }
     const opens = opt.opens(root);
     const clicks = opt.clicks(root);
     if (!opens) removePixel(root);
@@ -152,7 +200,7 @@
     if (!opens && !clicks) return;
 
     if (!isConfigured(settings)) {
-      toast(settings.mode === 'cloud' ? 'Sign in to Openly to track this email. It was sent without tracking.' : 'Openly is not set up yet, so this email was sent without tracking.', 'Open Openly', () => chrome.runtime.sendMessage({ type: 'open-settings' }));
+      toast(settings.mode === 'cloud' ? 'Sign in to Openly to track this email. It was sent without tracking.' : 'Openly is not set up yet, so this email was sent without tracking.', 'Open Openly', () => send({ type: 'open-settings' }));
       return;
     }
     const token = (root.dataset.openlyToken ||= crypto.randomUUID());
@@ -163,7 +211,7 @@
     const fingerprint = JSON.stringify(msg);
     if (root.dataset.openlySent === fingerprint) return; // already registered this exact message
     root.dataset.openlySent = fingerprint;
-    chrome.runtime.sendMessage({ type: 'register', payload: { token, ...msg, sentAt: new Date().toISOString() } });
+    send({ type: 'register', payload: { token, ...msg, sentAt: new Date().toISOString() } });
   }
 
   /* ---------- plain text mode can't carry tracking, so Send is held back ---------- */
@@ -187,13 +235,15 @@
       h('p', {}, 'Plain text emails cannot hold the tracking image or links. Turn off "Plain text mode" in the ⋮ More options menu of this window, then click Send.'),
       h('div', { class: 'openly-actions' },
         h('button', { type: 'button', class: 'primary', onclick: close }, 'OK, I will switch it'),
-        h('button', { type: 'button', onclick: () => {
-          root.dataset.openlyTrack = '0';
-          root.dataset.openlyClicks = '0';
-          repaint(root);
-          close();
-          toast('Tracking is off for this email. Click Send again to send it.');
-        } }, 'Send without tracking'))
+        h('button', {
+          type: 'button', onclick: () => {
+            root.dataset.openlyTrack = '0';
+            root.dataset.openlyClicks = '0';
+            repaint(root);
+            close();
+            toast('Tracking is off for this email. Click Send again to send it.');
+          }
+        }, 'Send without tracking'))
     );
     document.body.append(el);
     el.querySelector('button').focus();
@@ -201,8 +251,18 @@
 
   /* ---------- hooks: click on Send, or Ctrl/Cmd + Enter ---------- */
   let blockedUntil = 0;
+  // A problem in our code must never get in the way of sending, or leave half-made tracking links behind.
+  function safeBeforeSend(root) {
+    try {
+      beforeSend(root);
+    } catch (e) {
+      console.debug('[Openly]', e);
+      try { removePixel(root); restoreLinks(root); } catch { /* ignore */ }
+    }
+  }
   const stop = (e) => { e.preventDefault(); e.stopImmediatePropagation(); };
   function onPress(e) {
+    if (dead) return;
     const btn = e.target.closest?.(SEL.sendButton);
     if (!btn) return;
     const root = findCompose(btn);
@@ -214,24 +274,24 @@
       plainTextDialog(root);
       return;
     }
-    beforeSend(root);
+    safeBeforeSend(root);
   }
-  document.addEventListener('mousedown', onPress, true);
-  document.addEventListener('mouseup', (e) => { if (Date.now() < blockedUntil && e.target.closest?.(SEL.sendButton)) stop(e); }, true);
-  document.addEventListener('click', onPress, true);
-  document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter' || !(e.ctrlKey || e.metaKey)) return;
+  on('mousedown', onPress, true);
+  on('mouseup', (e) => { if (!dead && Date.now() < blockedUntil && e.target.closest?.(SEL.sendButton)) stop(e); }, true);
+  on('click', onPress, true);
+  on('keydown', (e) => {
+    if (dead || e.key !== 'Enter' || !(e.ctrlKey || e.metaKey)) return;
     const root = findCompose(e.target);
     if (!root) return;
     if (needsRichText(root)) { stop(e); plainTextDialog(root); return; }
-    beforeSend(root);
+    safeBeforeSend(root);
   }, true);
 
   /* ---------- the Track button and its small menu ---------- */
   let menu = null;
   const closeMenu = () => { menu?.remove(); menu = null; };
-  document.addEventListener('mousedown', (e) => { if (menu && !menu.contains(e.target) && !e.target.closest('.openly-toggle')) closeMenu(); }, true);
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { closeMenu(); document.querySelector('.openly-modal')?.remove(); } }, true);
+  on('mousedown', (e) => { if (menu && !menu.contains(e.target) && !e.target.closest('.openly-toggle')) closeMenu(); }, true);
+  on('keydown', (e) => { if (e.key === 'Escape') { closeMenu(); document.querySelector('.openly-modal')?.remove(); } }, true);
 
   function openMenu(root, anchor, repaint) {
     closeMenu();
@@ -275,6 +335,7 @@
     btn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (!alive()) { retire(); return; }
       if (menu) closeMenu(); else openMenu(root, btn, paint);
     });
     paint();
@@ -292,23 +353,30 @@
       const token = m[1].toLowerCase();
       if (Date.now() - (lastPing.get(token) || 0) < 20000) return;
       lastPing.set(token, Date.now());
-      chrome.runtime.sendMessage({ type: 'selfview', token });
+      send({ type: 'selfview', token });
     });
   }
 
   let queued = false;
   function scan() {
     queued = false;
-    document.querySelectorAll(SEL.sendButton).forEach((btn) => {
-      const root = findCompose(btn);
-      if (root) { decorate(root); repaint(root); }
-    });
-    scanForOwnViews();
+    if (dead) return;
+    if (!alive()) { retire(); return; }
+    try {
+      document.querySelectorAll(SEL.sendButton).forEach((btn) => {
+        const root = findCompose(btn);
+        if (root) { decorate(root); repaint(root); }
+      });
+      scanForOwnViews();
+    } catch (e) {
+      console.debug('[Openly]', e);
+    }
   }
-  new MutationObserver(() => {
-    if (queued) return;
+  observer = new MutationObserver(() => {
+    if (queued || dead) return;
     queued = true;
     setTimeout(scan, 300);
-  }).observe(document.body, { childList: true, subtree: true });
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
   scan();
 })();

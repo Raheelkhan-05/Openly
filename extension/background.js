@@ -3,7 +3,8 @@ const { api, getSettings, isConfigured, backendOf } = Openly;
 
 const dashboardUrl = (hash = '') => chrome.runtime.getURL('dashboard/dashboard.html') + hash;
 let chain = Promise.resolve();
-const serial = (fn) => (chain = chain.then(fn, fn));
+// Runs jobs one after another; a failed job never blocks the next one.
+const serial = (fn) => (chain = chain.catch(() => { }).then(() => fn()));
 
 /* ---------- badge ---------- */
 async function refreshBadge() {
@@ -118,8 +119,9 @@ function checkReminders() {
     try {
       const { reminders } = await api('/api/reminders/due', { settings: s });
       for (const r of reminders) {
-        await notify(`openly|${r.token}|r`, 'No open yet', r.subject || '(no subject)', `Sent ${Openly.timeAgo(r.sent_at)}. You asked for a reminder.`);
+        // Mark it first, so a failed request can never make the same reminder pop up every ten minutes.
         await api(`/api/emails/${r.token}/reminded`, { method: 'POST', settings: s });
+        await notify(`openly|${r.token}|r`, 'No open yet', r.subject || '(no subject)', `Sent ${Openly.timeAgo(r.sent_at)}. You asked for a reminder.`);
       }
     } catch { /* try again next time */ }
   });
@@ -131,19 +133,21 @@ function ensureAlarm() {
 }
 ensureAlarm();
 
+const quiet = (p) => Promise.resolve(p).catch(() => { });
+
 chrome.runtime.onInstalled.addListener((d) => {
   ensureAlarm();
-  syncBlockRule();
-  refreshBadge();
+  quiet(syncBlockRule());
+  quiet(refreshBadge());
   if (d.reason === 'install') chrome.tabs.create({ url: dashboardUrl('#settings') });
 });
-chrome.runtime.onStartup.addListener(() => { ensureAlarm(); syncBlockRule(); refreshBadge(); poll(); });
+chrome.runtime.onStartup.addListener(() => { ensureAlarm(); quiet(syncBlockRule()); quiet(refreshBadge()); quiet(poll()); });
 
 chrome.alarms.onAlarm.addListener((a) => {
   if (a.name !== 'tick') return;
-  serial(flushQueue);
-  poll();
-  checkReminders();
+  quiet(serial(flushQueue));
+  quiet(poll());
+  quiet(checkReminders());
 });
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -153,11 +157,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
     const n = changes.settings.newValue || {};
     if (['mode', 'backendUrl', 'apiKey', 'signedIn'].some((k) => o[k] !== n[k])) {
       chrome.storage.local.remove('cursor');
-      syncBlockRule();
-      serial(flushQueue).then(poll);
+      quiet(syncBlockRule());
+      quiet(serial(flushQueue).then(poll));
     }
   }
-  if (changes.unseen) refreshBadge();
+  if (changes.unseen) quiet(refreshBadge());
 });
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
@@ -167,7 +171,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     return true;
   }
   if (msg?.type === 'selfview') {
-    api(`/api/emails/${msg.token}/self-view`, { method: 'POST' }).catch(() => {});
+    quiet(api(`/api/emails/${msg.token}/self-view`, { method: 'POST' }));
     sendResponse({ ok: true });
     return;
   }
