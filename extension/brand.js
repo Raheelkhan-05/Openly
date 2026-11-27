@@ -1,3 +1,3 @@
 /*BRAND:BEGIN*/
-globalThis.OpenlyBrand = { author: 'Raheelkhan Lohani', project: 'Openly', fingerprint: null, publicKey: null, provenance: null, signature: null, signedAt: null };
+globalThis.OpenlyBrand = {"author":"Raheelkhan Lohani","project":"Openly","fingerprint":"7f647aa6cc9908ce","publicKey":"MCowBQYDK2VwAyEAVP+qR6NilAa94aOqgrHby8Hu/E2bG3iLIG6w+Zidvbk=","provenance":"{\"v\":1,\"s\":\"ude+ybnbML47Heiy/K94Sw==\",\"i\":\"QO4UsaNeKDbhnEBA\",\"t\":\"jCiFp7CSqQ2n+NL3GFL3nQ==\",\"c\":\"FasE+4Glm+WAat3B7MOS/Utqjy8SWHnXpjQw5OsYdqqjO3L2qEirorycj/ecsxWMFQi2LnOy+r3kAmuVpnbV3LKGoE5vCQcEJk5+mvHK7noooNMBrgL5SNEDqVe7yVKTaUZfI5c7WIW5Lrmn+0soh/HIL8JY86QNjDBVP51ZthwURfBbCNbvn8/rJzKAjGKF/1g=\"}","signature":"ADT2ADqlCICYx6VSJ6NhOqHHR0rMKw8k8V1q9+T0PHuji078Y5kJRkv2C04vJ1Ao+oB1uoX/hOtTb9Sk4B0oBA==","signedAt":"2026-11-27T04:46:54.775Z"};
 /*BRAND:END*/
