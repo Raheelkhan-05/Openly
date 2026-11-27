@@ -55,14 +55,22 @@
     }
     return best;
   }
+  // Gmail has no hidden "To" input. The chosen recipients are chips, and the address can sit in
+  // any of several attributes (email, data-hovercard-id, aria-label...), so every attribute is checked.
   function emailsIn(root, name) {
     const found = new Set();
-    const add = (text) => (text || '').match(EMAIL)?.forEach((e) => found.add(e.toLowerCase()));
-    root.querySelectorAll(`input[name="${name}"], textarea[name="${name}"]`).forEach((el) => add(el.value));
-    root.querySelectorAll(`[name="${name}"] [email], [name="${name}"] [data-hovercard-id]`).forEach((el) => {
-      add(el.getAttribute('email'));
-      add(el.getAttribute('data-hovercard-id'));
-    });
+    const scan = (node, withText) => {
+      for (const el of [node, ...node.querySelectorAll('*')]) {
+        if (el.closest(SEL.body)) continue;
+        for (const a of el.attributes) a.value.match(EMAIL)?.forEach((e) => found.add(e.toLowerCase()));
+        if (typeof el.value === 'string') el.value.match(EMAIL)?.forEach((e) => found.add(e.toLowerCase()));
+      }
+      if (withText) (node.textContent || '').match(EMAIL)?.forEach((e) => found.add(e.toLowerCase()));
+    };
+    const fields = [...root.querySelectorAll(`[name="${name}"]`)].filter((el) => !el.closest(SEL.body));
+    fields.forEach((el) => scan(el, true));
+    // If the named box is only a wrapper, look at its row too (attributes only, never the message text).
+    if (!found.size) fields.forEach((el) => { const row = el.closest('tr'); if (row && !row.contains(root.querySelector(SEL.body))) scan(row, false); });
     return [...found];
   }
   // Fallback: recipient chips anywhere in the compose window (skips the body and your own address).
@@ -84,6 +92,7 @@
     if (!to.length && !cc.length && !bcc.length) to = chipEmails(root);
     const subject =
       root.querySelector(SEL.subject)?.value?.trim() ||
+      root.querySelector('input[name="subject"]')?.value?.trim() ||
       document.querySelector('[role="dialog"] ' + SEL.subject)?.value?.trim() ||
       document.querySelector(SEL.threadSubject)?.textContent?.trim() ||
       '';
