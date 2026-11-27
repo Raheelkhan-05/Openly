@@ -22,6 +22,12 @@ var PROP_WAITING = 'waitingForSend';   // tokens added to drafts, not yet matche
 var PLACEHOLDER = '(sent from phone)';
 var GIVE_UP_MS = 3 * 24 * 3600 * 1000; // a tracked draft never sent within 3 days is removed from the dashboard
 var SAME_DRAFT_MS = 10 * 60 * 1000;
+var PROP_ATTEMPT = 'syncAttempt';
+var PROP_SYNC_AT = 'lastSyncAt';
+// After you add tracking, ONE short-lived check is scheduled, and only while an email is still waiting to be matched
+// to its sent copy. Gmail gives add-ons no "email sent" event, so it looks again after these waits (minutes), then
+// stops. Opening any email or the add-on also checks. Nothing runs on a fixed schedule.
+var CHECK_AFTER_MIN = [2, 5, 15, 60, 240, 720];
 // The email is registered as "sent" a little in the future. Gmail may load the image once while you are still
 // writing, and Openly ignores anything that arrives before the send time.
 var SEND_DELAY_MS = 3 * 60 * 1000;
@@ -111,6 +117,7 @@ function signOut() {
 
 /* ---------- cards ---------- */
 function onHomepage() {
+  syncIfWaiting_();
   var s = getSession_();
   var text = !cloudReady_()
     ? 'Openly is not set up yet. Fill in SUPABASE_URL and SUPABASE_ANON_KEY at the top of Code.gs.'
@@ -258,6 +265,7 @@ function addTracking(e) {
   var waiting = readJson_(PROP_WAITING, []);
   waiting.push({ token: token, at: Date.now() });
   props_().setProperty(PROP_WAITING, JSON.stringify(waiting.slice(-50)));
+  armSync_(true);
 
   var pixel = '<img src="' + backend_() + '/t/' + token + '.gif" alt="" width="1" height="1" ' +
     'style="border:0;width:1px;height:1px;opacity:0;">';
@@ -271,12 +279,49 @@ function addTracking(e) {
 /* ---------- after you send: fill in the real subject, recipients and send time ----------
    The add-on never sees the subject of a draft, so it finds the sent email by its tracking image and copies the
    subject, recipients and time to Openly. It runs every 5 minutes (run setupSync once), or from the home card. */
+// Run once after updating: removes the old every-5-minutes trigger and does a first check (which asks for Gmail access).
 function setupSync() {
-  ScriptApp.getProjectTriggers().forEach(function (t) {
-    if (t.getHandlerFunction() === 'syncPhoneEmails') ScriptApp.deleteTrigger(t);
-  });
-  ScriptApp.newTrigger('syncPhoneEmails').timeBased().everyMinutes(5).create();
+  removeOldTriggers_();
   return syncPhoneEmails();
+}
+function removeOldTriggers_() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'syncPhoneEmails') ScriptApp.deleteTrigger(t); // the old recurring one
+  });
+}
+// Schedules the single next check, or none when nothing is waiting or the checks have run out.
+function armSync_(restart) {
+  try {
+    ScriptApp.getProjectTriggers().forEach(function (t) {
+      if (t.getHandlerFunction() === 'syncAfterSend') ScriptApp.deleteTrigger(t);
+    });
+    if (!readJson_(PROP_WAITING, []).length) { props_().deleteProperty(PROP_ATTEMPT); return; }
+    var attempt = restart ? 0 : Number(props_().getProperty(PROP_ATTEMPT) || 0);
+    if (attempt >= CHECK_AFTER_MIN.length) return;
+    props_().setProperty(PROP_ATTEMPT, String(attempt + 1));
+    ScriptApp.newTrigger('syncAfterSend').timeBased().after(CHECK_AFTER_MIN[attempt] * 60 * 1000).create();
+  } catch (err) { /* tracking itself must never fail because of this */ }
+}
+function syncAfterSend() {
+  syncPhoneEmails();
+  armSync_(false);
+}
+// Checks only when something is waiting, and at most twice a minute.
+function syncIfWaiting_() {
+  if (!readJson_(PROP_WAITING, []).length) return;
+  var last = Number(props_().getProperty(PROP_SYNC_AT) || 0);
+  if (Date.now() - last < 30000) return;
+  props_().setProperty(PROP_SYNC_AT, String(Date.now()));
+  try { syncPhoneEmails(); } catch (err) { /* try again next time */ }
+}
+// Runs when you open an email in Gmail.
+function onMessageOpen() {
+  syncIfWaiting_();
+  return CardService.newCardBuilder()
+    .setHeader(CardService.newCardHeader().setTitle('Openly'))
+    .addSection(CardService.newCardSection().addWidget(CardService.newTextParagraph().setText(
+      'Write an email and open \"Track with Openly\" from the compose menu to track it.')))
+    .build();
 }
 
 function addresses_(text) {
@@ -290,6 +335,7 @@ function apiCall_(access, method, path, body) {
 }
 
 function syncPhoneEmails() {
+  try { removeOldTriggers_(); } catch (err) { /* ignore */ }
   var lock = LockService.getUserLock();
   if (!lock.tryLock(5000)) return 0;
   try {

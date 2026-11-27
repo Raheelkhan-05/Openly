@@ -46,12 +46,15 @@ Gmail never gives an add-on the subject of a draft, and does not reliably give t
 your sent email in the Sent folder (by its tracking image) and fills them in. Until then the email shows as
 "(sent from phone)".
 
+Nothing runs on a fixed schedule. After you tap **Add tracking**, one short check is scheduled (after 2, 5, 15, 60,
+240 and 720 minutes, and only while that email is still waiting). The add-on also checks when you open any email in
+Gmail or open the add-on, and when you tap **Update phone emails now**.
+
 One-time setup, in the Apps Script editor:
-1. Add `gmail.readonly` and `script.scriptapp` (already in `addon/appsscript.json`) and save.
-2. Pick `setupSync` in the function list and press Run. Accept the permissions.
+1. Replace `Code.gs` and `appsscript.json`, save.
+2. Pick `setupSync` in the function list and press Run. This deletes the old every-5-minutes trigger and asks for Gmail access.
 3. Reinstall the test deployment.
 
-After that it checks every 5 minutes. You can also open the add-on home screen and tap **Update phone emails now**.
 It only reads emails sent since you tapped Add tracking, looks for Openly's image, and never stores your messages.
 
 ## Using the extension and the add-on on the same email

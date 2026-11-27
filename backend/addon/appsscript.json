@@ -27,7 +27,13 @@
                     }
                 ],
                 "draftAccess": "METADATA"
-            }
+            },
+            "contextualTriggers": [
+                {
+                    "unconditional": {},
+                    "onTriggerFunction": "onMessageOpen"
+                }
+            ]
         }
     }
 }
