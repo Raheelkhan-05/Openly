@@ -115,6 +115,10 @@
     }
     const src = `${backendOf(settings)}/t/${token}.gif`;
     if (img.getAttribute('src') !== src) img.src = src;
+    // Tell Gmail the message changed, so it includes the image when it builds the email.
+    for (const type of ['input', 'keyup']) {
+      try { body.dispatchEvent(type === 'input' ? new InputEvent('input', { bubbles: true }) : new KeyboardEvent('keyup', { bubbles: true })); } catch { /* ignore */ }
+    }
     return true;
   }
   const removePixel = (root) => root.querySelectorAll('img[data-openly]').forEach((i) => i.remove());
@@ -152,6 +156,9 @@
       return;
     }
     const token = (root.dataset.openlyToken ||= crypto.randomUUID());
+    if (opens && root.querySelector(SEL.body)?.isContentEditable === false) {
+      toast('This email is in plain text mode, which cannot carry tracking. Turn off "Plain text mode" in the ⋮ More options menu of the compose window.');
+    }
     if (opens && !ensurePixel(root, token)) return;
     const links = clicks ? rewriteLinks(root, token) : [];
 

@@ -9,7 +9,7 @@ const { buildPixel } = require('./lib/pixel');
 const brand = require('./brand');
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const PIXEL_FILE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.gif$/i;
+const PIXEL_FILE = /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})(?:\.gif)?$/i;
 const GIF = buildPixel(brand.fingerprint ? 'openly:' + brand.fingerprint : null);
 
 const sha = (s) => crypto.createHash('sha256').update(s).digest();
