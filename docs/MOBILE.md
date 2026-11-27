@@ -12,7 +12,7 @@ email in the Gmail app, you tap **Add tracking** and the tracking image is put i
 | Tracks link clicks | No. Links in a draft cannot be rewritten from an add-on. |
 | Tells recipients apart | No. One email has one image. |
 | Real subject, recipients and send time | Yes, filled in automatically a few minutes after you send (see "After you send") |
-| Automatic | No. You tap **Add tracking** on each email, before you send. |
+| Automatic | Almost. Choosing **Track with Openly** in the compose menu adds tracking in one tap (`ONE_TAP` in `Code.gs`; set it to `false` for the old card with an Add tracking button). Gmail gives add-ons no way to run on its own when you open a compose. |
 
 If you tap it and then never send the email, the empty record is removed automatically after 3 days.
 Tapping **Add tracking** twice on the same draft does not add a second image: the card tells you tracking is already there.

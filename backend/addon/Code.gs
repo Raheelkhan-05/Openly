@@ -198,8 +198,17 @@ function composeCard_(meta) {
   return CardService.newCardBuilder().setHeader(CardService.newCardHeader().setTitle('Track with Openly')).addSection(section).build();
 }
 
+// ONE_TAP: choosing "Track with Openly" from the compose menu adds the tracking straight away, with no second tap.
+// This relies on Gmail accepting a draft update as the answer to the menu item. If Gmail shows an error when you
+// choose the menu item, set ONE_TAP to false: the card with the Add tracking button comes back.
+var ONE_TAP = true;
 function onCompose(e) {
-  return composeCard_(e && e.draftMetadata);
+  var meta = e && e.draftMetadata;
+  if (ONE_TAP && cloudReady_() && getSession_() && !recentTap_(meta)) {
+    var r = addTrackingResult_(e);
+    if (r.response) return r.response;
+  }
+  return composeCard_(meta);
 }
 
 /* ---------- adding the tracking image ---------- */
@@ -220,9 +229,9 @@ function readJson_(key, fallback) {
   try { var v = JSON.parse(props_().getProperty(key) || 'null'); return v == null ? fallback : v; } catch (err) { return fallback; }
 }
 
-function addTracking(e) {
+function addTrackingResult_(e) {
   var access = accessToken_();
-  if (!access) return notify_('Please sign in again.', refreshTo_(composeCard_()));
+  if (!access) return { message: 'Please sign in again.', relogin: true };
 
   // Gmail does not share the subject with add-ons. It is filled in from the Sent folder after you send (see syncPhoneEmails).
   var meta = (e && e.draftMetadata) || {};
@@ -235,7 +244,7 @@ function addTracking(e) {
   var signature = signatureOf_({ toRecipients: to, ccRecipients: cc, bccRecipients: bcc });
   var last = readJson_(PROP_LAST, {});
   var repeat = !forceNew && last.token && last.signature === signature && Date.now() - last.at < SAME_DRAFT_MS;
-  if (repeat) return notify_('Tracking is already added to this email. Just send it.');
+  if (repeat) return { message: 'Tracking is already added to this email. Just send it.' };
   var token = Utilities.getUuid();
 
   var res;
@@ -255,11 +264,11 @@ function addTracking(e) {
       })
     });
   } catch (err) {
-    return notify_('Could not reach your Openly server. Nothing was added.');
+    return { message: 'Could not reach your Openly server. Nothing was added.' };
   }
   var code = res.getResponseCode();
-  if (code === 401) { props_().deleteProperty(PROP_SESSION); return notify_('Please sign in again.', refreshTo_(composeCard_())); }
-  if (code !== 201) return notify_('Your server refused it (' + code + '). Nothing was added.');
+  if (code === 401) { props_().deleteProperty(PROP_SESSION); return { message: 'Please sign in again.', relogin: true }; }
+  if (code !== 201) return { message: 'Your server refused it (' + code + '). Nothing was added.' };
 
   props_().setProperty(PROP_LAST, JSON.stringify({ token: token, signature: signature, at: Date.now() }));
   var waiting = readJson_(PROP_WAITING, []);
@@ -269,11 +278,18 @@ function addTracking(e) {
 
   var pixel = '<img src="' + backend_() + '/t/' + token + '.gif" alt="" width="1" height="1" ' +
     'style="border:0;width:1px;height:1px;opacity:0;">';
-  return CardService.newUpdateDraftActionResponseBuilder()
+  return { response: CardService.newUpdateDraftActionResponseBuilder()
     .setUpdateDraftBodyAction(CardService.newUpdateDraftBodyAction()
       .addUpdateContent(pixel, CardService.ContentType.MUTABLE_HTML)
       .setUpdateType(CardService.UpdateDraftBodyType.IN_PLACE_INSERT))
-    .build();
+    .build() };
+}
+
+// The button on the card.
+function addTracking(e) {
+  var r = addTrackingResult_(e);
+  if (r.response) return r.response;
+  return notify_(r.message, r.relogin ? refreshTo_(composeCard_()) : null);
 }
 
 /* ---------- after you send: fill in the real subject, recipients and send time ----------
