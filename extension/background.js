@@ -60,6 +60,16 @@ async function flushQueue() {
   await chrome.storage.local.set({ pending: keep });
 }
 
+// Other tracking ids that were in the same draft (for example from tapping the add-on twice). Their images were removed
+// from the email, so their empty records are deleted instead of showing up as duplicates in the dashboard.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+async function discardTokens(tokens, keep) {
+  for (const t of Array.isArray(tokens) ? tokens.slice(0, 5) : []) {
+    if (!UUID_RE.test(t) || t.toLowerCase() === String(keep).toLowerCase()) continue;
+    try { await api(`/api/emails/${t.toLowerCase()}`, { method: 'DELETE' }); } catch { /* it may not exist, which is fine */ }
+  }
+}
+
 /* ---------- notifications ---------- */
 function notify(id, title, message, context) {
   return chrome.notifications.create(id, { type: 'basic', iconUrl: chrome.runtime.getURL('icons/icon128.png'), title, message, contextMessage: context || '' });
@@ -167,7 +177,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (sender.id !== chrome.runtime.id) return;
   if (msg?.type === 'register') {
-    enqueue(msg.payload).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
+    enqueue(msg.payload).then(() => discardTokens(msg.discard, msg.payload.token)).then(() => sendResponse({ ok: true }), () => sendResponse({ ok: false }));
     return true;
   }
   if (msg?.type === 'selfview') {

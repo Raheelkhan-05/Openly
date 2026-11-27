@@ -18,6 +18,10 @@ var SUPABASE_ANON_KEY = 'sb_publishable_XiLY546OmTkqd4kckMjF3g_CTv9GoF5';   // t
 var PROP_SESSION = 'session';
 var PROP_PENDING = 'pendingEmail';
 var PROP_LAST = 'lastTracked';
+var PROP_WAITING = 'waitingForSend';   // tokens added to drafts, not yet matched to a sent email
+var PLACEHOLDER = '(sent from phone)';
+var GIVE_UP_MS = 3 * 24 * 3600 * 1000; // a tracked draft never sent within 3 days is removed from the dashboard
+var SAME_DRAFT_MS = 10 * 60 * 1000;
 // The email is registered as "sent" a little in the future. Gmail may load the image once while you are still
 // writing, and Openly ignores anything that arrives before the send time.
 var SEND_DELAY_MS = 3 * 60 * 1000;
@@ -112,9 +116,14 @@ function onHomepage() {
     ? 'Openly is not set up yet. Fill in SUPABASE_URL and SUPABASE_ANON_KEY at the top of Code.gs.'
     : s ? 'Signed in as ' + s.email + '.\n\nTo track an email, start writing it in Gmail, then open "Track with Openly" from the compose menu.'
         : 'Not signed in.\n\nStart writing an email in Gmail, then open "Track with Openly" from the compose menu to sign in.';
+  var section = CardService.newCardSection().addWidget(CardService.newTextParagraph().setText(text));
+  if (s) {
+    section.addWidget(CardService.newTextButton().setText('Update phone emails now')
+      .setOnClickAction(CardService.newAction().setFunctionName('syncNow')));
+  }
   return CardService.newCardBuilder()
     .setHeader(CardService.newCardHeader().setTitle('Openly'))
-    .addSection(CardService.newCardSection().addWidget(CardService.newTextParagraph().setText(text)))
+    .addSection(section)
     .build();
 }
 
@@ -160,11 +169,22 @@ function composeCard_(meta) {
   }
   var s = getSession_();
   if (!s) return signInCard_();
-  var section = CardService.newCardSection()
-    .addWidget(CardService.newTextParagraph().setText(
+  var recent = recentTap_(meta);
+  var section = CardService.newCardSection();
+  if (recent) {
+    // The image is already in this draft. Adding it again would put a second image in the email.
+    section.addWidget(CardService.newTextParagraph().setText(
+      'Tracking is already added to this email. Just send it.\n\nIf this is a different, new email, tap the button below.'))
+      .addWidget(CardService.newTextButton().setText('This is a new email: add tracking again')
+        .setOnClickAction(CardService.newAction().setFunctionName('addTracking')
+          .setParameters(Object.assign({ forceNew: '1' }, metaParams_(meta)))));
+  } else {
+    section.addWidget(CardService.newTextParagraph().setText(
       'Write your email and add the recipients first, then tap Add tracking. That is all.'))
-    .addWidget(CardService.newTextButton().setText('Add tracking').setTextButtonStyle(CardService.TextButtonStyle.FILLED)
-      .setOnClickAction(CardService.newAction().setFunctionName('addTracking').setParameters(metaParams_(meta))))
+      .addWidget(CardService.newTextButton().setText('Add tracking').setTextButtonStyle(CardService.TextButtonStyle.FILLED)
+        .setOnClickAction(CardService.newAction().setFunctionName('addTracking').setParameters(metaParams_(meta))));
+  }
+  section
     .addWidget(CardService.newTextParagraph().setText('Signed in as ' + s.email))
     .addWidget(CardService.newTextButton().setText('Sign out')
       .setOnClickAction(CardService.newAction().setFunctionName('signOut')));
@@ -180,22 +200,36 @@ function list_(v) {
   return (v || []).map(function (x) { return String(x).replace(/^.*<([^>]+)>.*$/, '$1').trim(); }).filter(String);
 }
 
+// The tracked draft this card belongs to, if tracking was added a few minutes ago for the same recipients.
+function recentTap_(meta) {
+  var last = readJson_(PROP_LAST, {});
+  if (!last.token || Date.now() - last.at > SAME_DRAFT_MS) return null;
+  return last.signature === signatureOf_(meta || {}) ? last : null;
+}
+function signatureOf_(meta) {
+  return JSON.stringify([list_(meta.toRecipients).sort(), list_(meta.ccRecipients).sort(), list_(meta.bccRecipients).sort()]);
+}
+function readJson_(key, fallback) {
+  try { var v = JSON.parse(props_().getProperty(key) || 'null'); return v == null ? fallback : v; } catch (err) { return fallback; }
+}
+
 function addTracking(e) {
   var access = accessToken_();
   if (!access) return notify_('Please sign in again.', refreshTo_(composeCard_()));
 
-  // Gmail does not share the subject with add-ons, so the dashboard shows these emails as "sent from phone".
+  // Gmail does not share the subject with add-ons. It is filled in from the Sent folder after you send (see syncPhoneEmails).
   var meta = (e && e.draftMetadata) || {};
   var to = list_(meta.toRecipients), cc = list_(meta.ccRecipients), bcc = list_(meta.bccRecipients);
   if (!to.length && !cc.length && !bcc.length) { to = list_(paramList_(e, 'to')); cc = list_(paramList_(e, 'cc')); bcc = list_(paramList_(e, 'bcc')); }
-  var label = '';
-  var remind = 0;
+  var forceNew = !!(e && e.commonEventObject && e.commonEventObject.parameters && e.commonEventObject.parameters.forceNew) ||
+                 !!(e && e.parameters && e.parameters.forceNew);
 
-  // Tapping twice for the same draft must not make two different tracked emails.
-  var signature = JSON.stringify([to, cc, bcc, label]);
-  var last = {};
-  try { last = JSON.parse(props_().getProperty(PROP_LAST) || '{}'); } catch (err) { last = {}; }
-  var token = (last.signature === signature && Date.now() - last.at < 10 * 60 * 1000) ? last.token : Utilities.getUuid();
+  // Tapping twice for the same draft must neither add a second image nor create a second tracked email.
+  var signature = signatureOf_({ toRecipients: to, ccRecipients: cc, bccRecipients: bcc });
+  var last = readJson_(PROP_LAST, {});
+  var repeat = !forceNew && last.token && last.signature === signature && Date.now() - last.at < SAME_DRAFT_MS;
+  if (repeat) return notify_('Tracking is already added to this email. Just send it.');
+  var token = Utilities.getUuid();
 
   var res;
   try {
@@ -207,9 +241,9 @@ function addTracking(e) {
       payload: JSON.stringify({
         token: token,
         to: to, cc: cc, bcc: bcc,
-        subject: label ? label : '(sent from phone)',
+        subject: PLACEHOLDER,
         links: [],
-        remindAfterHours: remind,
+        remindAfterHours: 0,
         sentAt: new Date(Date.now() + SEND_DELAY_MS).toISOString()
       })
     });
@@ -221,6 +255,9 @@ function addTracking(e) {
   if (code !== 201) return notify_('Your server refused it (' + code + '). Nothing was added.');
 
   props_().setProperty(PROP_LAST, JSON.stringify({ token: token, signature: signature, at: Date.now() }));
+  var waiting = readJson_(PROP_WAITING, []);
+  waiting.push({ token: token, at: Date.now() });
+  props_().setProperty(PROP_WAITING, JSON.stringify(waiting.slice(-50)));
 
   var pixel = '<img src="' + backend_() + '/t/' + token + '.gif" alt="" width="1" height="1" ' +
     'style="border:0;width:1px;height:1px;opacity:0;">';
@@ -229,4 +266,85 @@ function addTracking(e) {
       .addUpdateContent(pixel, CardService.ContentType.MUTABLE_HTML)
       .setUpdateType(CardService.UpdateDraftBodyType.IN_PLACE_INSERT))
     .build();
+}
+
+/* ---------- after you send: fill in the real subject, recipients and send time ----------
+   The add-on never sees the subject of a draft, so it finds the sent email by its tracking image and copies the
+   subject, recipients and time to Openly. It runs every 5 minutes (run setupSync once), or from the home card. */
+function setupSync() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'syncPhoneEmails') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('syncPhoneEmails').timeBased().everyMinutes(5).create();
+  return syncPhoneEmails();
+}
+
+function addresses_(text) {
+  return (String(text || '').match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || []).map(function (x) { return x.toLowerCase(); });
+}
+
+function apiCall_(access, method, path, body) {
+  var opts = { method: method, headers: { authorization: 'Bearer ' + access }, muteHttpExceptions: true };
+  if (body) { opts.contentType = 'application/json'; opts.payload = JSON.stringify(body); }
+  return UrlFetchApp.fetch(backend_() + path, opts).getResponseCode();
+}
+
+function syncPhoneEmails() {
+  var lock = LockService.getUserLock();
+  if (!lock.tryLock(5000)) return 0;
+  try {
+    var waiting = readJson_(PROP_WAITING, []);
+    if (!waiting.length) return 0;
+    var access = accessToken_();
+    if (!access) return 0;
+
+    var oldest = waiting.reduce(function (m, w) { return Math.min(m, w.at); }, Date.now());
+    var threads;
+    try {
+      threads = GmailApp.search('in:sent after:' + Math.floor((oldest - 3600 * 1000) / 1000), 0, 50);
+    } catch (err) {
+      return 0; // no Gmail permission yet: keep everything for the next run
+    }
+    var byToken = {};
+    threads.forEach(function (th) {
+      th.getMessages().forEach(function (m) {
+        if (m.isDraft()) return;
+        var html = m.getBody();
+        waiting.forEach(function (w) {
+          if (html.indexOf(w.token) !== -1) byToken[w.token] = m;
+        });
+      });
+    });
+
+    var left = [], done = 0;
+    waiting.forEach(function (w) {
+      var m = byToken[w.token];
+      if (m) {
+        var status;
+        try {
+          status = apiCall_(access, 'post', '/api/emails/' + w.token + '/details', {
+            subject: m.getSubject() || '(no subject)',
+            to: addresses_(m.getTo()), cc: addresses_(m.getCc()), bcc: addresses_(m.getBcc()),
+            sentAt: m.getDate().toISOString()
+          });
+        } catch (err) { left.push(w); return; }
+        if (status === 200 || status === 404) { done++; return; } // 404: already removed (for example by the Chrome extension)
+        left.push(w);
+      } else if (Date.now() - w.at > GIVE_UP_MS) {
+        // Tracking was added but the email was never sent: remove the empty record so it does not clutter the dashboard.
+        try { apiCall_(access, 'delete', '/api/emails/' + w.token); } catch (err) { left.push(w); }
+      } else {
+        left.push(w);
+      }
+    });
+    props_().setProperty(PROP_WAITING, JSON.stringify(left));
+    return done;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function syncNow() {
+  var n = syncPhoneEmails();
+  return notify_(n ? 'Updated ' + n + ' email' + (n === 1 ? '' : 's') + '.' : 'Nothing new to update yet. Sent emails appear here a minute after you send.');
 }

@@ -162,22 +162,44 @@
     }
     return true;
   }
-  const removePixel = (root) => root.querySelectorAll('img[data-openly]').forEach((i) => i.remove());
-  // The Openly Gmail add-on (phone) may already have put a tracking image in this email. Use that one, with its
-  // token, instead of adding a second image, so one email never becomes two records.
-  function findForeignPixel(root) {
-    const body = root.querySelector(SEL.body);
-    if (!body) return null;
-    const base = backendOf(settings);
-    if (!base) return null;
-    for (const img of body.querySelectorAll('img[src*="/t/"]')) {
-      if (img.hasAttribute('data-openly')) continue;
-      const src = img.getAttribute('src') || '';
-      if (!src.startsWith(base + '/')) continue;
-      const m = TOKEN_IN_URL.exec(src);
-      if (m) return { img, token: m[1].toLowerCase() };
+  const removePixel = (root) => { root.querySelectorAll('img[data-openly]').forEach((i) => i.remove()); findPixels(root).forEach((p) => p.img.remove()); };
+  // The Openly Gmail add-on (phone, or the side panel in Gmail) may already have put a tracking image in this email.
+  // Use that one, with its token, instead of adding a second image, so one email never becomes two records.
+  // Gmail can rewrite an image address (a googleusercontent proxy address that ends in the original one, or the original
+  // kept in data-surl), so the backend address is looked for anywhere in src / data-surl, not only at the start.
+  // The extension's own image (marked data-openly) counts as well, so a reopened draft keeps its one token.
+  function pixelToken(img, base) {
+    for (const attr of ['src', 'data-surl', 'data-src']) {
+      const v = img.getAttribute(attr) || '';
+      if (!v.includes(base + '/t/') && !v.includes(encodeURIComponent(base + '/t/'))) continue;
+      const m = TOKEN_IN_URL.exec(decodeURIComponentSafe(v));
+      if (m) return m[1].toLowerCase();
     }
     return null;
+  }
+  function decodeURIComponentSafe(v) { try { return decodeURIComponent(v); } catch { return v; } }
+  // Every Openly image in the body, in order, each with its token.
+  function findPixels(root) {
+    const body = root.querySelector(SEL.body);
+    const base = backendOf(settings);
+    if (!body || !base) return [];
+    const out = [];
+    for (const img of body.querySelectorAll('img')) {
+      const token = pixelToken(img, base);
+      if (token) out.push({ img, token });
+    }
+    return out;
+  }
+  // Keep the first image, remove any others (a second tap on "Add tracking", or an old copy), and report the tokens of
+  // the removed ones that differ, so their empty records can be deleted instead of showing up as duplicates.
+  function collapsePixels(root, pixels) {
+    const keep = pixels[0];
+    const discarded = new Set();
+    for (const p of pixels.slice(1)) {
+      p.img.remove();
+      if (p.token !== keep.token) discarded.add(p.token);
+    }
+    return { keep, discarded: [...discarded] };
   }
 
   /* ---------- link tracking: links go through your server, which sends people on ---------- */
@@ -210,8 +232,9 @@
       retire();
       return;
     }
-    const foreign = findForeignPixel(root);
-    const opens = opt.opens(root) || !!foreign; // tapping "Add tracking" in the add-on is an explicit choice
+    const pixels = findPixels(root);
+    const foreign = pixels.length > 0;
+    const opens = opt.opens(root) || foreign; // an image that is already there (add-on, or an earlier draft) is an explicit choice
     const clicks = opt.clicks(root);
     if (!opens) removePixel(root);
     if (!clicks) restoreLinks(root);
@@ -222,11 +245,13 @@
       return;
     }
     let token;
+    let discard = [];
     if (foreign) {
-      token = foreign.token;
+      const c = collapsePixels(root, pixels);
+      token = c.keep.token;
+      discard = c.discarded;
       root.dataset.openlyToken = token;
-      root.querySelectorAll('img[data-openly]').forEach((i) => { if (i !== foreign.img) i.remove(); });
-      foreign.img.setAttribute('data-openly', '');
+      c.keep.img.setAttribute('data-openly', '');
     } else {
       token = (root.dataset.openlyToken ||= crypto.randomUUID());
     }
@@ -237,7 +262,7 @@
     const fingerprint = JSON.stringify(msg);
     if (root.dataset.openlySent === fingerprint) return; // already registered this exact message
     root.dataset.openlySent = fingerprint;
-    send({ type: 'register', payload: { token, ...msg, sentAt: new Date().toISOString() } });
+    send({ type: 'register', payload: { token, ...msg, sentAt: new Date().toISOString() }, discard });
   }
 
   /* ---------- plain text mode can't carry tracking, so Send is held back ---------- */

@@ -292,3 +292,25 @@ test('delete removes one email; delete-all wipes your data only', async () => {
   assert.equal(exp.emails.length, 1);
   server.close();
 });
+
+test('details fills in subject and recipients without wiping links', async () => {
+  const { server, register, call, get } = await boot();
+  const t = uuid();
+  await register(t, { subject: '(sent from phone)', to: [], links: [{ n: 1, url: 'https://example.com/a' }] });
+  const r = await call('/api/emails/' + t + '/details', { method: 'POST', body: JSON.stringify({ subject: 'Real subject', to: ['Bob@X.com'], sentAt: ago(60000) }) });
+  assert.equal(r.status, 200);
+  const e = await get(t);
+  assert.equal(e.subject, 'Real subject');
+  assert.deepEqual(e.to_recipients, ['bob@x.com']);
+  assert.equal(e.link_count, 1);
+  server.close();
+});
+
+test('details cannot touch another person\'s email', async () => {
+  const { server, call } = await boot({ authMode: 'supabase' });
+  const t = uuid();
+  await call('/api/emails', { method: 'POST', body: JSON.stringify({ token: t, subject: 'x', to: ['a@x.com'] }) }, 'user-a');
+  const r = await call('/api/emails/' + t + '/details', { method: 'POST', body: JSON.stringify({ subject: 'hijack' }) }, 'user-b');
+  assert.equal(r.status, 404);
+  server.close();
+});
