@@ -1,0 +1,23 @@
+name: Release
+on:
+  push:
+    tags: ['v*']
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: npm ci --prefix backend || npm install --prefix backend
+      - run: npm test --prefix backend
+      - name: Check the signature (skipped if you have not signed yet)
+        run: if [ -f BRAND.sig.json ]; then node tools/brand.js verify; fi
+      - name: Zip the extension
+        run: cd extension && zip -r ../openly-extension-${GITHUB_REF_NAME}.zip . -x '*.DS_Store'
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: openly-extension-*.zip
+          generate_release_notes: true

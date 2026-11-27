@@ -1,0 +1,14 @@
+{
+  "name": "openly",
+  "private": true,
+  "version": "1.0.0",
+  "author": "Raheelkhan Lohani",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "test": "npm --prefix backend test",
+    "brand:init": "node tools/brand.js init",
+    "brand:sign": "node tools/brand.js sign",
+    "brand:verify": "node tools/brand.js verify",
+    "brand:reveal": "node tools/brand.js reveal"
+  }
+}

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Openly</title>
+  <link rel="stylesheet" href="../ui/base.css">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="head">
+    <div class="brand"><span class="brand-mark" id="brandMark"></span><span>Openly</span></div>
+    <button class="btn icon-btn ghost" id="openSettings" type="button" aria-label="Settings" title="Settings"></button>
+  </header>
+  <div id="content"></div>
+  <div id="pause" class="pause" hidden></div>
+  <footer class="foot">
+    <label class="switch"><input type="checkbox" id="trackByDefault"><span class="track"></span><span class="copy"><span>Track new emails</span></span></label>
+    <button class="btn primary" id="openDash" type="button">Open dashboard</button>
+  </footer>
+  <script src="../config.js"></script>
+  <script src="../shared.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

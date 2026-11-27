@@ -1,0 +1,45 @@
+{
+  "manifest_version": 3,
+  "name": "Openly: email open tracking",
+  "version": "1.0.0",
+  "description": "See when your Gmail emails are opened, without mixing up your own views with your recipients'.",
+  "minimum_chrome_version": "113",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "Openly"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "storage",
+    "alarms",
+    "notifications",
+    "declarativeNetRequest"
+  ],
+  "host_permissions": [
+    "https://mail.google.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://mail.google.com/*"
+      ],
+      "js": [
+        "config.js",
+        "shared.js",
+        "content/gmail.js"
+      ],
+      "css": [
+        "content/gmail.css"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "author": "Raheelkhan Lohani"
+}
