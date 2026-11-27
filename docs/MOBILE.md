@@ -14,7 +14,9 @@ email in the Gmail app, you tap **Add tracking** and the tracking image is put i
 | Real subject, recipients and send time | Yes, filled in automatically a few minutes after you send (see "After you send") |
 | Automatic | No. You tap **Add tracking** on each email, before you send. |
 
-If you tap it and then do not send the email, it shows in the dashboard as an email nobody opened. Delete the record.
+If you tap it and then never send the email, the empty record is removed automatically after 3 days.
+Tapping **Add tracking** twice on the same draft does not add a second image: the card tells you tracking is already there.
+Use **This is a new email: add tracking again** only for a different email.
 
 ## Set up (about 5 minutes)
 

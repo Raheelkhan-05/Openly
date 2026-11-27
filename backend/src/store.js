@@ -20,6 +20,12 @@ function memoryStore() {
       return row;
     },
     async getEmail(token) { return emails.get(token) || null; },
+    async updateEmail(owner, token, patch) {
+      const e = emails.get(token);
+      if (!e || e.owner !== owner) return null;
+      Object.assign(e, patch);
+      return e;
+    },
     async emailsByTokens(tokens) { return tokens.map((t) => emails.get(t)).filter(Boolean); },
     async listEmails(owner, limit) {
       return [...emails.values()].filter((e) => e.owner === owner).sort((a, b) => Date.parse(b.sent_at) - Date.parse(a.sent_at)).slice(0, limit);
@@ -86,6 +92,9 @@ function supabaseStore(url, key) {
     client: sb,
     async upsertEmail(e) { return ok(await sb.from('tracked_emails').upsert(e, { onConflict: 'token' }).select().single()); },
     async getEmail(token) { return ok(await sb.from('tracked_emails').select('*').eq('token', token).maybeSingle()); },
+    async updateEmail(owner, token, patch) {
+      return ok(await sb.from('tracked_emails').update(patch).eq('token', token).eq('owner', owner).select().maybeSingle());
+    },
     async emailsByTokens(tokens) {
       if (!tokens.length) return [];
       return ok(await sb.from('tracked_emails').select('*').in('token', tokens));

@@ -197,6 +197,26 @@ function createApp({ store, config, verifyToken }) {
     res.status(201).json({ ok: true });
   }));
 
+  // Fills in the real subject, recipients and send time of an email that was registered without them (the phone
+  // add-on cannot read the subject of a draft). It never touches links or reminders, so it cannot undo what the
+  // Chrome extension registered for the same token.
+  app.post('/api/emails/:token/details', wrap(async (req, res) => {
+    const token = tokenParam(req, res); if (!token) return;
+    const b = req.body || {};
+    const patch = {};
+    if (typeof b.subject === 'string' && b.subject.trim()) patch.subject = b.subject.trim().slice(0, 998);
+    for (const [key, col] of [['to', 'to_recipients'], ['cc', 'cc_recipients'], ['bcc', 'bcc_recipients']]) {
+      if (Array.isArray(b[key])) patch[col] = cleanList(b[key]);
+    }
+    const sent = Date.parse(b.sentAt);
+    if (Number.isFinite(sent) && sent <= Date.now() + 5 * 60_000) patch.sent_at = new Date(sent).toISOString();
+    if (!Object.keys(patch).length) return res.status(400).json({ error: 'Nothing to update.' });
+    const row = await store.updateEmail(req.owner, token, patch);
+    if (!row) return res.status(404).json({ error: 'Unknown email.' });
+    cache.delete(token);
+    res.json({ ok: true });
+  }));
+
   app.post('/api/emails/:token/self-view', wrap(async (req, res) => {
     const token = tokenParam(req, res); if (!token) return;
     const email = await store.getEmail(token);
