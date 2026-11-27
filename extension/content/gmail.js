@@ -23,6 +23,7 @@
     try { observer?.disconnect(); } catch { /* ignore */ }
     listeners.forEach(([type, fn, opts]) => document.removeEventListener(type, fn, opts));
     document.querySelectorAll('.openly-toggle, .openly-menu, .openly-modal').forEach((el) => el.remove());
+    document.querySelectorAll('.openly-locked').forEach((el) => { el.classList.remove('openly-locked'); el.removeAttribute('aria-disabled'); el.removeAttribute('title'); });
     window.__openlyLoaded = false;
     try { toast('Openly was updated or reloaded. Refresh this Gmail tab to keep tracking your emails.'); } catch { /* ignore */ }
   }
@@ -287,6 +288,51 @@
     safeBeforeSend(root);
   }, true);
 
+  /* ---------- Plain text mode stays OFF while tracking is on ----------
+     Plain text emails cannot carry the tracking image or links, so while tracking is on for the compose you are
+     writing in, Gmail's "Plain text mode" menu item is greyed out and cannot be switched on. Turn Track off to use it. */
+  let lastCompose = null;
+  on('focusin', (e) => { const r = findCompose(e.target); if (r) lastCompose = r; }, true);
+  on('mousedown', (e) => { const r = findCompose(e.target); if (r) lastCompose = r; }, true);
+
+  function trackingActive() {
+    let root = lastCompose?.isConnected ? lastCompose : null;
+    if (!root) {
+      const btn = document.querySelector(SEL.sendButton);
+      root = btn ? findCompose(btn) : null;
+    }
+    return !!root && isConfigured(settings) && (opt.opens(root) || opt.clicks(root));
+  }
+  const PLAIN_ITEM = '[role="menuitemcheckbox"], [role="menuitem"]';
+  const isPlainTextItem = (el) => {
+    const t = (el.textContent || '').trim();
+    return t.length < 40 && /plain text mode/i.test(t);
+  };
+  function lockPlainText() {
+    if (dead) return;
+    const lock = trackingActive();
+    document.querySelectorAll(PLAIN_ITEM).forEach((el) => {
+      if (!isPlainTextItem(el)) return;
+      if (lock) {
+        el.classList.add('openly-locked');
+        el.setAttribute('aria-disabled', 'true');
+        el.title = 'Openly: plain text emails cannot be tracked. Turn Track off to use plain text mode.';
+      } else if (el.classList.contains('openly-locked')) {
+        el.classList.remove('openly-locked');
+        el.removeAttribute('aria-disabled');
+        el.removeAttribute('title');
+      }
+    });
+  }
+  const blockLocked = (e) => {
+    if (dead) return;
+    const item = e.target.closest?.('.openly-locked');
+    if (!item) return;
+    stop(e);
+    if (e.type === 'mouseup') toast('Plain text mode is off while Openly tracking is on. Turn Track off for this email to use it.');
+  };
+  ['mousedown', 'mouseup', 'click'].forEach((t) => on(t, blockLocked, true));
+
   /* ---------- the Track button and its small menu ---------- */
   let menu = null;
   const closeMenu = () => { menu?.remove(); menu = null; };
@@ -367,13 +413,16 @@
         const root = findCompose(btn);
         if (root) { decorate(root); repaint(root); }
       });
+      lockPlainText();
       scanForOwnViews();
     } catch (e) {
       console.debug('[Openly]', e);
     }
   }
   observer = new MutationObserver(() => {
-    if (queued || dead) return;
+    if (dead) return;
+    try { lockPlainText(); } catch { /* ignore */ } // right away, so the menu item never looks clickable
+    if (queued) return;
     queued = true;
     setTimeout(scan, 300);
   });
