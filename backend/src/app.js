@@ -177,12 +177,10 @@ function createApp({ store, config, verifyToken }) {
     const b = req.body || {};
     if (!UUID.test(String(b.token || ''))) return res.status(400).json({ error: 'token must be a UUID.' });
     const token = b.token.toLowerCase();
-    const existing = await store.getEmail(token);
-    if (existing && existing.owner !== req.owner) return res.status(409).json({ error: 'This tracking id belongs to someone else.' });
     let sent = Date.parse(b.sentAt);
     if (!Number.isFinite(sent) || sent > Date.now() + 5 * 60_000) sent = Date.now();
     const hours = Math.min(Math.max(Number(b.remindAfterHours) || 0, 0), 24 * 30);
-    await store.upsertEmail({
+    const row = {
       token,
       owner: req.owner,
       subject: String(b.subject || '').slice(0, 998),
@@ -192,7 +190,14 @@ function createApp({ store, config, verifyToken }) {
       links: cleanLinks(b.links),
       remind_at: hours ? new Date(sent + hours * 3600_000).toISOString() : null,
       sent_at: new Date(sent).toISOString(),
-    });
+    };
+    // A new email is one database call. Only when the token already exists (the same email registered again) do we
+    // check who owns it first.
+    if (!(await store.insertEmail(row))) {
+      const existing = await store.getEmail(token);
+      if (existing && existing.owner !== req.owner) return res.status(409).json({ error: 'This tracking id belongs to someone else.' });
+      await store.upsertEmail(row);
+    }
     cache.delete(token);
     res.status(201).json({ ok: true });
   }));

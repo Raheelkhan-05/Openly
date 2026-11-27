@@ -20,6 +20,11 @@ function memoryStore() {
       return row;
     },
     async getEmail(token) { return emails.get(token) || null; },
+    // Inserts a brand-new email. Returns null (and changes nothing) when the token already exists.
+    async insertEmail(e) {
+      if (emails.has(e.token)) return null;
+      return this.upsertEmail(e);
+    },
     async updateEmail(owner, token, patch) {
       const e = emails.get(token);
       if (!e || e.owner !== owner) return null;
@@ -92,6 +97,14 @@ function supabaseStore(url, key) {
     client: sb,
     async upsertEmail(e) { return ok(await sb.from('tracked_emails').upsert(e, { onConflict: 'token' }).select().single()); },
     async getEmail(token) { return ok(await sb.from('tracked_emails').select('*').eq('token', token).maybeSingle()); },
+    async insertEmail(e) {
+      const { data, error } = await sb.from('tracked_emails').insert(e).select().single();
+      if (error) {
+        if (error.code === '23505') return null; // token already exists
+        throw new Error(error.message);
+      }
+      return data;
+    },
     async updateEmail(owner, token, patch) {
       return ok(await sb.from('tracked_emails').update(patch).eq('token', token).eq('owner', owner).select().maybeSingle());
     },

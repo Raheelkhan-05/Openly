@@ -52,7 +52,7 @@ Gmail or open the add-on, and when you tap **Update phone emails now**.
 
 One-time setup, in the Apps Script editor:
 1. Replace `Code.gs` and `appsscript.json`, save.
-2. Pick `setupSync` in the function list and press Run. This deletes the old every-5-minutes trigger and asks for Gmail access.
+2. Pick `setupSync` in the function list and press Run. This deletes every old trigger (the 5-minute one and any leftovers such as `syncSent`) and asks for Gmail access.
 3. Reinstall the test deployment.
 
 It only reads emails sent since you tapped Add tracking, looks for Openly's image, and never stores your messages.
@@ -61,3 +61,6 @@ It only reads emails sent since you tapped Add tracking, looks for Openly's imag
 
 If you tap **Add tracking** in the add-on while writing in Gmail on a computer, the Chrome extension notices that image
 and uses it instead of adding a second one, so you get one record with the real subject and recipients.
+
+The add-on home card shows when the last check ran and why it could not schedule or read Gmail, if it could not.
+Scheduled checks can run a few minutes after their time: Google does not run one-off triggers to the second.

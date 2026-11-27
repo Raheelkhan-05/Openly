@@ -23,6 +23,8 @@ var PLACEHOLDER = '(sent from phone)';
 var GIVE_UP_MS = 3 * 24 * 3600 * 1000; // a tracked draft never sent within 3 days is removed from the dashboard
 var SAME_DRAFT_MS = 10 * 60 * 1000;
 var PROP_ATTEMPT = 'syncAttempt';
+var PROP_ARMED = 'syncArmedAt';
+var PROP_STATUS = 'syncStatus';
 var PROP_SYNC_AT = 'lastSyncAt';
 // After you add tracking, ONE short-lived check is scheduled, and only while an email is still waiting to be matched
 // to its sent copy. Gmail gives add-ons no "email sent" event, so it looks again after these waits (minutes), then
@@ -35,7 +37,20 @@ var SEND_DELAY_MS = 3 * 60 * 1000;
 /* ---------- small helpers ---------- */
 function backend_() { return BACKEND_URL.replace(/\/+$/, ''); }
 function cloudReady_() { return !!(SUPABASE_URL && SUPABASE_ANON_KEY); }
-function props_() { return PropertiesService.getUserProperties(); }
+// All saved values are read in ONE call per run (each separate read costs about 100 ms) and writes go through.
+var PROPS_ = null;
+function props_() {
+  if (PROPS_) return PROPS_;
+  var store = PropertiesService.getUserProperties();
+  var cache = store.getProperties();
+  PROPS_ = {
+    getProperty: function (k) { return Object.prototype.hasOwnProperty.call(cache, k) ? cache[k] : null; },
+    setProperty: function (k, v) { cache[k] = String(v); store.setProperty(k, String(v)); },
+    setProperties: function (o) { Object.keys(o).forEach(function (k) { cache[k] = String(o[k]); }); store.setProperties(o); },
+    deleteProperty: function (k) { delete cache[k]; store.deleteProperty(k); }
+  };
+  return PROPS_;
+}
 
 function notify_(text, navigation) {
   var b = CardService.newActionResponseBuilder().setNotification(CardService.newNotification().setText(text));
@@ -124,6 +139,8 @@ function onHomepage() {
     : s ? 'Signed in as ' + s.email + '.\n\nTo track an email, start writing it in Gmail, then open "Track with Openly" from the compose menu.'
         : 'Not signed in.\n\nStart writing an email in Gmail, then open "Track with Openly" from the compose menu to sign in.';
   var section = CardService.newCardSection().addWidget(CardService.newTextParagraph().setText(text));
+  var status = props_().getProperty(PROP_STATUS);
+  if (s && status) section.addWidget(CardService.newTextParagraph().setText('Last update check ' + status));
   if (s) {
     section.addWidget(CardService.newTextButton().setText('Update phone emails now')
       .setOnClickAction(CardService.newAction().setFunctionName('syncNow')));
@@ -270,10 +287,13 @@ function addTrackingResult_(e) {
   if (code === 401) { props_().deleteProperty(PROP_SESSION); return { message: 'Please sign in again.', relogin: true }; }
   if (code !== 201) return { message: 'Your server refused it (' + code + '). Nothing was added.' };
 
-  props_().setProperty(PROP_LAST, JSON.stringify({ token: token, signature: signature, at: Date.now() }));
   var waiting = readJson_(PROP_WAITING, []);
   waiting.push({ token: token, at: Date.now() });
-  props_().setProperty(PROP_WAITING, JSON.stringify(waiting.slice(-50)));
+  props_().setProperties({
+    lastTracked: JSON.stringify({ token: token, signature: signature, at: Date.now() }),
+    waitingForSend: JSON.stringify(waiting.slice(-50)),
+    syncAttempt: '0'
+  });
   armSync_(true);
 
   var pixel = '<img src="' + backend_() + '/t/' + token + '.gif" alt="" width="1" height="1" ' +
@@ -295,30 +315,45 @@ function addTracking(e) {
 /* ---------- after you send: fill in the real subject, recipients and send time ----------
    The add-on never sees the subject of a draft, so it finds the sent email by its tracking image and copies the
    subject, recipients and time to Openly. It runs every 5 minutes (run setupSync once), or from the home card. */
-// Run once after updating: removes the old every-5-minutes trigger and does a first check (which asks for Gmail access).
+// Run once after updating: removes every old trigger (the 5-minute one, and any left over from earlier versions such as
+// syncSent, which no longer exists and only produced "Failed" runs) and does a first check, which asks for Gmail access.
 function setupSync() {
-  removeOldTriggers_();
+  removeTriggers_(true);
   return syncPhoneEmails();
 }
-function removeOldTriggers_() {
+// Deletes triggers. Always the ones that call something other than syncAfterSend; the one-shot ones too when asked.
+function removeTriggers_(includeOneShots) {
   ScriptApp.getProjectTriggers().forEach(function (t) {
-    if (t.getHandlerFunction() === 'syncPhoneEmails') ScriptApp.deleteTrigger(t); // the old recurring one
+    var fn = t.getHandlerFunction();
+    if (fn !== 'syncAfterSend' || includeOneShots) ScriptApp.deleteTrigger(t);
   });
 }
-// Schedules the single next check, or none when nothing is waiting or the checks have run out.
+function setStatus_(text) {
+  try { props_().setProperty(PROP_STATUS, new Date().toLocaleTimeString('en-IN') + ': ' + text); } catch (err) { /* ignore */ }
+}
+// Schedules the next check (one trigger), or none when nothing is waiting or the checks have run out. Kept cheap, because
+// it runs while you wait for the draft to update: no listing of triggers, and no new one when a check is already due soon.
 function armSync_(restart) {
   try {
-    ScriptApp.getProjectTriggers().forEach(function (t) {
-      if (t.getHandlerFunction() === 'syncAfterSend') ScriptApp.deleteTrigger(t);
-    });
-    if (!readJson_(PROP_WAITING, []).length) { props_().deleteProperty(PROP_ATTEMPT); return; }
+    if (!readJson_(PROP_WAITING, []).length) return;
+    var armed = Number(props_().getProperty(PROP_ARMED) || 0);
+    if (restart && armed > Date.now() && armed - Date.now() < 10 * 60 * 1000) return;
     var attempt = restart ? 0 : Number(props_().getProperty(PROP_ATTEMPT) || 0);
-    if (attempt >= CHECK_AFTER_MIN.length) return;
-    props_().setProperty(PROP_ATTEMPT, String(attempt + 1));
-    ScriptApp.newTrigger('syncAfterSend').timeBased().after(CHECK_AFTER_MIN[attempt] * 60 * 1000).create();
-  } catch (err) { /* tracking itself must never fail because of this */ }
+    if (attempt >= CHECK_AFTER_MIN.length) {
+      setStatus_('Automatic checks are finished. Tap Update phone emails now.');
+      return;
+    }
+    var delay = CHECK_AFTER_MIN[attempt] * 60 * 1000;
+    ScriptApp.newTrigger('syncAfterSend').timeBased().after(delay).create();
+    props_().setProperties({ syncAttempt: String(attempt + 1), syncArmedAt: String(Date.now() + delay) });
+  } catch (err) {
+    console.error('Could not schedule the automatic update: ' + err);
+    setStatus_('Could not schedule the automatic update (' + err.message + '). Tap Update phone emails now after sending.');
+  }
 }
 function syncAfterSend() {
+  try { removeTriggers_(true); } catch (err) { /* ignore */ }   // the one that just fired, and anything stale
+  props_().deleteProperty(PROP_ARMED);
   syncPhoneEmails();
   armSync_(false);
 }
@@ -351,7 +386,6 @@ function apiCall_(access, method, path, body) {
 }
 
 function syncPhoneEmails() {
-  try { removeOldTriggers_(); } catch (err) { /* ignore */ }
   var lock = LockService.getUserLock();
   if (!lock.tryLock(5000)) return 0;
   try {
@@ -365,6 +399,8 @@ function syncPhoneEmails() {
     try {
       threads = GmailApp.search('in:sent after:' + Math.floor((oldest - 3600 * 1000) / 1000), 0, 50);
     } catch (err) {
+      console.error('Gmail search failed: ' + err);
+      setStatus_('Cannot read Gmail yet. Run setupSync once in the editor and reinstall the add-on.');
       return 0; // no Gmail permission yet: keep everything for the next run
     }
     var byToken = {};
@@ -400,6 +436,7 @@ function syncPhoneEmails() {
       }
     });
     props_().setProperty(PROP_WAITING, JSON.stringify(left));
+    setStatus_(done ? 'Updated ' + done + ' email' + (done === 1 ? '' : 's') + '.' : left.length ? 'Waiting for ' + left.length + ' email' + (left.length === 1 ? '' : 's') + ' to be sent.' : 'Nothing waiting.');
     return done;
   } finally {
     lock.releaseLock();
