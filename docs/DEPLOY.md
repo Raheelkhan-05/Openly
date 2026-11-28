@@ -58,6 +58,22 @@ Load the extension (see below), sign in, send yourself a tracked email from Gmai
 
 ---
 
+## Making it fast
+
+Where the time goes, and what Openly now does about it:
+
+- **Signing in on every request.** Tokens are now checked on the server itself, against Supabase's public keys, so there is no
+  round trip to Supabase per request. (Older projects that sign with a shared secret: set `SUPABASE_JWT_SECRET`.)
+- **The tracking image.** It answers immediately and saves the open afterwards, so a reader's mail app never waits for your database.
+  On Vercel this uses `waitUntil` (package `@vercel/functions`). If you ever see opens go missing, set `DEFER_WRITES=off`.
+- **The dashboard.** Lists and details are remembered until something changes, one database round trip fetches everything about one
+  email, unchanged lists answer `304 Not Modified`, and the dashboard shows its last copy instantly and refreshes behind it.
+- **Redis (optional).** Without it the cache lives inside each server instance, which is fine at small scale. With Upstash Redis
+  (free tier) every instance shares it, so repeat requests skip the database entirely. Set `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`.
+- **Put the server next to the database.** This matters more than everything above. Supabase > Project Settings > Infrastructure shows
+  your database region. In Vercel > Project Settings > Functions, pick the nearest region (for example Mumbai `bom1` for ap-south-1).
+  A server in the US talking to a database in India pays about 200 ms on every database call.
+
 ## B. Self-hosting (someone running it just for themselves)
 Same steps, but in step 3 set `AUTH_MODE=apikey` and `API_KEY=<long random string>`, and in the extension choose **My own server** and paste the address and key. No sign-in service needed.
 

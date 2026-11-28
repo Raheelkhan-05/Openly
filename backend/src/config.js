@@ -15,6 +15,14 @@ const config = {
   driver: (env.DB_DRIVER || (env.SUPABASE_URL ? 'supabase' : 'memory')).toLowerCase(),
   supabaseUrl: env.SUPABASE_URL || '',
   supabaseKey: env.SUPABASE_SERVICE_ROLE_KEY || '',
+  // Only needed for older Supabase projects that sign tokens with a shared secret (Settings > API > JWT Secret).
+  // Newer projects publish public keys, which are used automatically.
+  jwtSecret: env.SUPABASE_JWT_SECRET || '',
+  // Optional Redis (Upstash REST) shared by all server instances, for caching. Everything works without it.
+  redisUrl: env.UPSTASH_REDIS_REST_URL || env.KV_REST_API_URL || '',
+  redisToken: env.UPSTASH_REDIS_REST_TOKEN || env.KV_REST_API_TOKEN || '',
+  // The tracking image answers first and saves the open afterwards. Set DEFER_WRITES=off to save before answering.
+  deferWrites: env.DEFER_WRITES !== 'off',
   appleRanges: env.APPLE_RANGES === 'on',
   ipSalt:
     env.IP_SALT ||

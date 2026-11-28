@@ -67,7 +67,14 @@ html = html
   .replace('<script src="../config.js"></script>', '<script src="chrome-shim.js"></script>\n<script src="config.js"></script>')
   .replace('../brand.js', 'brand.js')
   .replace('../shared.js', 'shared.js')
+  .replace(/\s*<script src="\.\.\/vendor\/qrcode\.js"><\/script>/, '')
   .replace('<title>Openly</title>', '<title>Openly</title>\n  <meta name="theme-color" content="#0B8F6A">\n  <link rel="manifest" href="manifest.webmanifest">\n  <link rel="icon" href="icons/icon48.png">\n  <link rel="apple-touch-icon" href="icons/icon128.png">');
+// Scripts and styles are referenced by content hash, so the server can let browsers keep them for a year.
+const crypto = require('crypto');
+for (const f of ['base.css', 'dashboard.css', 'chrome-shim.js', 'config.js', 'brand.js', 'shared.js', 'dashboard.js']) {
+  const hash = crypto.createHash('sha1').update(fs.readFileSync(path.join(out, f))).digest('hex').slice(0, 10);
+  html = html.replace(new RegExp(`((?:src|href)=")${f.replace('.', '\\.')}"`), `$1${f}?v=${hash}"`);
+}
 fs.writeFileSync(path.join(out, 'index.html'), html);
 
 fs.writeFileSync(path.join(out, 'manifest.webmanifest'), JSON.stringify({

@@ -2,112 +2,173 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Openly</title>
   <meta name="theme-color" content="#0B8F6A">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icons/icon48.png">
   <link rel="apple-touch-icon" href="icons/icon128.png">
-  <link rel="stylesheet" href="base.css">
-  <link rel="stylesheet" href="dashboard.css">
+  <link rel="stylesheet" href="base.css?v=e97be4b4ee">
+  <link rel="stylesheet" href="dashboard.css?v=20c60ac699">
 </head>
 <body>
-<div class="app">
-  <nav class="rail" aria-label="Main">
-    <div class="brand"><span class="brand-mark" id="brandMark"></span><span class="brand-name">Openly</span></div>
-    <button class="nav" data-nav="emails" type="button"><span class="nav-icon" data-icon="mail"></span><span>Emails</span></button>
-    <button class="nav" data-nav="insights" type="button"><span class="nav-icon" data-icon="chart"></span><span>Insights</span></button>
-    <button class="nav" data-nav="settings" type="button"><span class="nav-icon" data-icon="settings"></span><span>Settings</span><span class="nav-flag" id="settingsFlag" hidden></span></button>
-  </nav>
+
+<!-- Signing in. Shown instead of the app until an account (or your own server) is connected. -->
+<div class="gate" id="gate" hidden>
+  <div class="gate-card">
+    <div class="wordmark gate-mark"><span class="brand-mark" data-mark></span><span>Openly</span></div>
+    <h1 class="gate-title" id="gateTitle">Know when your email is read.</h1>
+    <p class="gate-lead" id="gateLead">Sign in with your email. We send a six-digit code, so there is no password to remember.</p>
+    <div id="gateBody"></div>
+    <p class="gate-foot" id="gateFoot"></p>
+  </div>
+  <aside class="gate-side" aria-hidden="true">
+    <div class="gate-quote serif">An email that has been read<br>is not the same as<br>an email that was sent.</div>
+    <ul class="gate-points">
+      <li><span class="tick-wrap" data-tick="opened"></span>Opens, clicks and when they happened</li>
+      <li><span class="tick-wrap" data-tick="possible"></span>Scanners and previews flagged, not counted</li>
+      <li><span class="tick-wrap" data-tick="none"></span>Reminders for emails nobody opened</li>
+    </ul>
+  </aside>
+</div>
+
+<div class="app" id="app">
+  <aside class="rail" aria-label="Main">
+    <div class="wordmark"><span class="brand-mark" data-mark></span><span class="wordmark-text">Openly</span></div>
+    <nav class="rail-nav">
+      <button class="nav" data-nav="emails" type="button"><span class="nav-icon" data-icon="mail"></span><span class="nav-label">Emails</span><span class="nav-count" id="navCount" hidden></span></button>
+      <button class="nav" data-nav="insights" type="button"><span class="nav-icon" data-icon="chart"></span><span class="nav-label">Insights</span></button>
+      <button class="nav" data-nav="settings" type="button"><span class="nav-icon" data-icon="settings"></span><span class="nav-label">Settings</span><span class="nav-flag" id="settingsFlag" hidden></span></button>
+    </nav>
+    <div class="rail-foot">
+      <div class="rail-account" id="railAccount"></div>
+    </div>
+  </aside>
 
   <main class="main">
     <section id="view-emails" class="view">
-      <header class="topbar">
-        <h1>Tracked emails</h1>
-        <button class="btn icon-btn ghost" id="refreshBtn" type="button" aria-label="Refresh" title="Refresh"></button>
-      </header>
-      <div class="stats" id="stats" role="group" aria-label="Filter by status"></div>
       <div class="split" id="split" data-mode="list">
         <div class="list-pane">
-          <label class="search"><span data-icon="search"></span><input class="search-input" id="search" type="search" placeholder="Search subject or recipient" autocomplete="off"></label>
+          <header class="pane-head">
+            <div>
+              <h1>Sent mail</h1>
+              <p class="pane-sub" id="freshness">&nbsp;</p>
+            </div>
+            <button class="btn icon-btn ghost" id="refreshBtn" type="button" aria-label="Refresh" title="Refresh"></button>
+          </header>
+          <div class="metrics" id="metrics" role="group" aria-label="Filter by status"></div>
+          <div class="attention" id="attention" hidden></div>
+          <div class="tools">
+            <label class="search"><span data-icon="search"></span><input class="input search-input" id="search" type="search" placeholder="Search emails" autocomplete="off" aria-label="Search emails"></label>
+            <select class="input" id="sortBy" aria-label="Sort"><option value="sent">Newest sent</option><option value="seen">Recently opened</option><option value="opens">Most opens</option></select>
+            <select class="input" id="range" aria-label="Time range"><option value="0">All time</option><option value="7">7 days</option><option value="30">30 days</option></select>
+          </div>
           <ul class="list" id="list"></ul>
         </div>
         <div class="detail-pane" id="detail"></div>
       </div>
     </section>
 
-    <section id="view-insights" class="view" hidden>
-      <header class="topbar"><h1>Insights</h1></header>
+    <section id="view-insights" class="view page" hidden>
+      <header class="page-head"><h1>Insights</h1><p class="pane-sub">What your last 200 tracked emails say about how people read.</p></header>
       <div id="insights"></div>
     </section>
 
-    <section id="view-settings" class="view settings" hidden>
-      <header class="topbar"><h1>Settings</h1></header>
+    <section id="view-settings" class="view page" hidden>
+      <header class="page-head"><h1>Settings</h1></header>
+      <div class="settings-grid">
+        <nav class="subnav" aria-label="Settings sections" id="subnav">
+          <a href="#settings" data-sec="account">Account</a>
+          <a href="#settings" data-sec="phone" class="ext-only">Phone and web</a>
+          <a href="#settings" data-sec="tracking" class="ext-only">Tracking</a>
+          <a href="#settings" data-sec="notify" class="ext-only">Notifications</a>
+          <a href="#settings" data-sec="data">Your data</a>
+          <a href="#settings" data-sec="about">About</a>
+        </nav>
+        <div class="sections">
+          <section class="sec" id="sec-account">
+            <div class="sec-head"><h2>Account</h2><p class="hint" id="accountHint"></p></div>
+            <div class="sec-body" id="accountBody"></div>
+          </section>
 
-      <div class="group">
-        <div class="group-head"><h2>Account</h2><p class="hint" id="accountHint"></p></div>
-        <div class="group-body" id="accountBody"></div>
-        <p class="hint ext-only" id="webLink" hidden></p>
-      </div>
+          <section class="sec ext-only" id="sec-phone">
+            <div class="sec-head"><h2>Phone and web</h2><p class="hint">The same dashboard works in any browser, so you can check on your phone. You stay signed in: no code to type again.</p></div>
+            <div class="sec-body">
+              <div class="actions">
+                <button class="btn primary" id="openWeb" type="button"></button>
+                <button class="btn" id="showQr" type="button"></button>
+              </div>
+              <p class="inline-msg" id="webMsg" role="status"></p>
+              <div class="qr" id="qrBox" hidden>
+                <div class="qr-code" id="qrCode"></div>
+                <div class="qr-copy">
+                  <strong>Scan with your phone camera</strong>
+                  <p>It opens the dashboard already signed in. This code works once. Don't share a screenshot of it.</p>
+                  <button class="btn small" id="qrAgain" type="button">Make a new code</button>
+                </div>
+              </div>
+            </div>
+          </section>
 
-      <div class="group ext-only">
-        <div class="group-head"><h2>Tracking</h2><p class="hint">Defaults for new emails. You can change them for one email from the Track button in Gmail.</p></div>
-        <div class="group-body">
-          <label class="switch"><input type="checkbox" id="trackByDefault"><span class="track"></span><span class="copy"><span>Track opens</span><small>Adds an invisible image to the email.</small></span></label>
-          <label class="switch"><input type="checkbox" id="trackClicksByDefault"><span class="track"></span><span class="copy"><span>Track link clicks</span><small>A click confirms a real person even when images are blocked. Links go through your server, and a few spam filters dislike that.</small></span></label>
-          <div class="field"><label for="remindAfterHours">Remind me if an email isn't opened</label>
-            <select class="input" id="remindAfterHours"><option value="0">Never</option><option value="24">After 1 day</option><option value="72">After 3 days</option><option value="168">After 1 week</option></select>
-          </div>
+          <section class="sec ext-only" id="sec-tracking">
+            <div class="sec-head"><h2>Tracking</h2><p class="hint">Defaults for new emails. You can change them for one email with the Track button in Gmail.</p></div>
+            <div class="sec-body">
+              <label class="switch"><input type="checkbox" id="trackByDefault"><span class="track"></span><span class="copy"><span>Track opens</span><small>Adds an invisible image to the email.</small></span></label>
+              <label class="switch"><input type="checkbox" id="trackClicksByDefault"><span class="track"></span><span class="copy"><span>Track link clicks</span><small>A click proves a real person, even when images are blocked. Links go through your server, and a few spam filters dislike that.</small></span></label>
+              <div class="field"><label for="remindAfterHours">Remind me if an email isn't opened</label>
+                <select class="input narrow" id="remindAfterHours"><option value="0">Never</option><option value="24">After 1 day</option><option value="72">After 3 days</option><option value="168">After 1 week</option></select>
+              </div>
+            </div>
+          </section>
+
+          <section class="sec ext-only" id="sec-notify">
+            <div class="sec-head"><h2>Notifications</h2><p class="hint">Chrome notifications while the browser is open.</p></div>
+            <div class="sec-body">
+              <label class="switch"><input type="checkbox" id="notifyOpens"><span class="track"></span><span class="copy"><span>First open</span><small>The first time an email is opened.</small></span></label>
+              <label class="switch"><input type="checkbox" id="notifyClicks"><span class="track"></span><span class="copy"><span>Link clicks</span><small>When someone clicks a tracked link.</small></span></label>
+              <label class="switch"><input type="checkbox" id="notifyRepeat"><span class="track"></span><span class="copy"><span>Repeat opens</span><small>Also when the same email is opened again.</small></span></label>
+              <label class="switch"><input type="checkbox" id="notifyPossible"><span class="track"></span><span class="copy"><span>Possible opens</span><small>Also uncertain activity, such as scanners.</small></span></label>
+              <div class="actions"><button class="btn" id="testNotif" type="button">Send a test notification</button></div>
+            </div>
+          </section>
+
+          <section class="sec" id="sec-data">
+            <div class="sec-head"><h2>Your data</h2><p class="hint">Only you can see it. Nothing is sold or shared.</p></div>
+            <div class="sec-body"><div class="actions">
+              <button class="btn" id="exportBtn" type="button"></button>
+              <button class="btn danger" id="wipeBtn" type="button">Delete all my data</button>
+            </div></div>
+          </section>
+
+          <section class="sec" id="sec-about">
+            <div class="sec-head"><h2>How to read the results</h2></div>
+            <div class="sec-body prose">
+              <p>An open means the tracking image loaded. That does not prove anyone read the message, so each result says how sure Openly is.</p>
+              <dl class="legend">
+                <div><dt><span data-tick="opened"></span>High</dt><dd>A link was clicked, or a real mail app loaded the image.</dd></div>
+                <div><dt><span data-tick="opened"></span>Medium</dt><dd>Gmail or Yahoo loaded it for the reader. If you looked at your own sent mail on your phone, pause counting from the toolbar popup or use "That was me".</dd></div>
+                <div><dt><span data-tick="possible"></span>Low</dt><dd>Only scanners or preloads so far. These never count as a read.</dd></div>
+              </dl>
+              <p>When one email goes to several people, an open can't be matched to a person. A forwarded email can be opened by someone you didn't write to; Openly shows when it sees more than one device.</p>
+            </div>
+            <div class="sec-body about" id="about"></div>
+          </section>
         </div>
-      </div>
-
-      <div class="group ext-only">
-        <div class="group-head"><h2>Notifications</h2></div>
-        <div class="group-body">
-          <label class="switch"><input type="checkbox" id="notifyOpens"><span class="track"></span><span class="copy"><span>First open</span><small>A Chrome notification the first time an email is opened.</small></span></label>
-          <label class="switch"><input type="checkbox" id="notifyClicks"><span class="track"></span><span class="copy"><span>Link clicks</span><small>When someone clicks a tracked link.</small></span></label>
-          <label class="switch"><input type="checkbox" id="notifyRepeat"><span class="track"></span><span class="copy"><span>Repeat opens</span><small>Also notify when the same email is opened again.</small></span></label>
-          <label class="switch"><input type="checkbox" id="notifyPossible"><span class="track"></span><span class="copy"><span>Possible opens</span><small>Also notify for uncertain activity, such as scanners.</small></span></label>
-          <div class="actions"><button class="btn" id="testNotif" type="button">Send a test notification</button></div>
-        </div>
-      </div>
-
-      <div class="group">
-        <div class="group-head"><h2>Your data</h2><p class="hint">Only you can see it. Nothing is sold or shared.</p></div>
-        <div class="group-body">
-          <div class="actions">
-            <button class="btn" id="exportBtn" type="button"></button>
-            <button class="btn danger" id="wipeBtn" type="button">Delete all my data</button>
-          </div>
-        </div>
-      </div>
-
-      <div class="group">
-        <div class="group-head"><h2>What Openly can and can't tell you</h2></div>
-        <div class="group-body prose">
-          <p>An open means the tracking image was loaded. It doesn't prove anyone read the message. Openly shows how sure it is.</p>
-          <ul>
-            <li>High: a link was clicked, or a real mail app loaded the image.</li>
-            <li>Medium: Gmail or Yahoo loaded the image for the reader. If you checked your sent mail on your phone, pause counting from the toolbar popup or use "That was me".</li>
-            <li>Low: only scanners or preloads so far, which never count as a read.</li>
-            <li>When one email goes to several people, an open can't be matched to a person.</li>
-            <li>Forwarded emails can be opened by people you didn't write to. Openly shows when it sees more than one device.</li>
-          </ul>
-        </div>
-      </div>
-
-      <div class="group">
-        <div class="group-head"><h2>About</h2></div>
-        <div class="group-body about" id="about"></div>
       </div>
     </section>
   </main>
+
+  <nav class="tabbar" aria-label="Main">
+    <button class="tab" data-nav="emails" type="button"><span data-icon="mail"></span><span>Emails</span></button>
+    <button class="tab" data-nav="insights" type="button"><span data-icon="chart"></span><span>Insights</span></button>
+    <button class="tab" data-nav="settings" type="button"><span data-icon="settings"></span><span>Settings</span></button>
+  </nav>
 </div>
 <div class="toasts" id="toasts" aria-live="polite"></div>
-<script src="chrome-shim.js"></script>
-<script src="config.js"></script>
-<script src="brand.js"></script>
-<script src="shared.js"></script>
-<script src="dashboard.js"></script>
+<script src="chrome-shim.js?v=5c06b7d84c"></script>
+<script src="config.js?v=23cccefc39"></script>
+<script src="brand.js?v=b7874a02cc"></script>
+<script src="shared.js?v=d35626801a"></script>
+<script src="dashboard.js?v=9ade3bff04"></script>
 </body>
 </html>

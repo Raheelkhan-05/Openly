@@ -76,3 +76,10 @@ Scheduled checks can run a few minutes after their time: Google does not run one
 - **Find in Gmail:** every email in the dashboard has a Find in Gmail button that searches your Sent mail by recipient, subject and date.
 
 After changing `extension/dashboard`, `extension/ui` or `extension/shared.js`, run `npm run build:web` and redeploy the backend.
+
+
+## Staying signed in across devices
+
+- **Extension to web or phone:** in Settings > Phone and web, press *Open web dashboard*, or *Show QR code* and scan it with your phone. You arrive signed in.
+- **Gmail add-on to web:** *Open dashboard* in the add-on opens the browser already signed in.
+- How it works: the server makes a one-time value for your account (`POST /api/handoff`); the web page swaps it for its **own** session with Supabase and removes it from the address bar. Devices never share a refresh token, so signing in on one cannot sign out another.

@@ -142,8 +142,7 @@ function onHomepage() {
   var status = props_().getProperty(PROP_STATUS);
   if (s && status) section.addWidget(CardService.newTextParagraph().setText('Last update check ' + status));
   if (s) {
-    section.addWidget(CardService.newTextButton().setText('Open dashboard')
-      .setOpenLink(CardService.newOpenLink().setUrl(dashboardUrl_()).setOpenAs(CardService.OpenAs.FULL_SIZE)));
+    section.addWidget(dashboardButton_());
     section.addWidget(CardService.newTextButton().setText('Update phone emails now')
       .setOnClickAction(CardService.newAction().setFunctionName('syncNow')));
   }
@@ -373,6 +372,31 @@ var PIXEL_RE = /\/t\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 
 function dashboardUrl_(token) { return backend_() + '/app/' + (token ? '#email=' + token : ''); }
 
+// The "Open dashboard" button: asks the server for a one-time sign-in value, so the browser opens the dashboard already
+// signed in (no code to type on the phone). If that fails, the plain address opens and asks for a code instead.
+function openDashboard(e) {
+  var p = (e && e.parameters) || (e && e.commonEventObject && e.commonEventObject.parameters) || {};
+  var token = p.token || '';
+  var url = dashboardUrl_(token);
+  try {
+    var access = getSession_() ? accessToken_() : null;
+    if (access) {
+      var res = UrlFetchApp.fetch(backend_() + '/api/handoff', { method: 'post', headers: { authorization: 'Bearer ' + access }, muteHttpExceptions: true });
+      if (res.getResponseCode() === 200) {
+        url = backend_() + '/app/#handoff=' + encodeURIComponent(JSON.parse(res.getContentText()).token_hash) +
+          (token ? '&go=' + encodeURIComponent('email=' + token) : '');
+      }
+    }
+  } catch (err) { console.error('Could not prepare the sign-in link: ' + err); }
+  return CardService.newActionResponseBuilder()
+    .setOpenLink(CardService.newOpenLink().setUrl(url).setOpenAs(CardService.OpenAs.FULL_SIZE))
+    .build();
+}
+function dashboardButton_(token) {
+  return CardService.newTextButton().setText('Open dashboard')
+    .setOnClickAction(CardService.newAction().setFunctionName('openDashboard').setParameters({ token: token || '' }));
+}
+
 function ago_(iso) {
   var sec = Math.max(0, (Date.now() - Date.parse(iso)) / 1000);
   if (sec < 45) return 'just now';
@@ -418,8 +442,7 @@ function summaryCard_(email, token) {
     section.addWidget(CardService.newTextParagraph().setText(
       'Sent to ' + email.recipient_count + ' people with one tracking image, so Openly cannot tell who opened it.'));
   }
-  section.addWidget(CardService.newTextButton().setText('Open dashboard')
-    .setOpenLink(CardService.newOpenLink().setUrl(dashboardUrl_(token)).setOpenAs(CardService.OpenAs.FULL_SIZE)));
+  section.addWidget(dashboardButton_(token));
   return CardService.newCardBuilder()
     .setHeader(CardService.newCardHeader().setTitle('Openly').setSubtitle(email.subject || ''))
     .addSection(section).build();
@@ -441,8 +464,7 @@ function onMessageOpen(e) {
     .setHeader(CardService.newCardHeader().setTitle('Openly'))
     .addSection(CardService.newCardSection()
       .addWidget(CardService.newTextParagraph().setText('This email is not tracked by you. To track one, open "Track with Openly" from the compose menu.'))
-      .addWidget(CardService.newTextButton().setText('Open dashboard')
-        .setOpenLink(CardService.newOpenLink().setUrl(dashboardUrl_()).setOpenAs(CardService.OpenAs.FULL_SIZE))))
+      .addWidget(dashboardButton_()))
     .build();
 }
 

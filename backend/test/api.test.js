@@ -16,8 +16,8 @@ const ago = (ms) => new Date(Date.now() - ms).toISOString();
 
 async function boot(overrides = {}) {
   const store = memoryStore();
-  const config = { ...base, apiKey: KEY, ipSalt: 'salt', authMode: 'apikey', ...overrides };
-  const verifyToken = async (t) => (t.startsWith('user-') ? t : null);
+  const config = { ...base, apiKey: KEY, ipSalt: 'salt', authMode: 'apikey', deferWrites: false, ...overrides };
+  const verifyToken = async (t) => (t.startsWith('user-') ? { uid: t, email: t + '@example.com' } : null);
   const app = createApp({ store, config, verifyToken });
   const server = await new Promise((r) => { const s = app.listen(0, () => r(s)); });
   const url = `http://127.0.0.1:${server.address().port}`;

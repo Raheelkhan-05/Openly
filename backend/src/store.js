@@ -20,6 +20,7 @@ function memoryStore() {
       return row;
     },
     async getEmail(token) { return emails.get(token) || null; },
+    async createLoginLink(email) { return 'hash-for-' + email; }, // the memory store has no accounts; this only serves tests
     // Inserts a brand-new email. Returns null (and changes nothing) when the token already exists.
     async insertEmail(e) {
       if (emails.has(e.token)) return null;
@@ -128,7 +129,12 @@ function supabaseStore(url, key) {
       ok(await sb.from('pause_windows').delete().eq('owner', owner));
       ok(await sb.from('tracked_emails').delete().eq('owner', owner));
     },
-    async addEvent(ev) { return ok(await sb.from('email_events').insert(ev).select().single()); },
+    async addEvent(ev) { ok(await sb.from('email_events').insert(ev)); }, // no row comes back: one less thing to wait for
+    async createLoginLink(email) {
+      const { data, error } = await sb.auth.admin.generateLink({ type: 'magiclink', email });
+      if (error || !data?.properties?.hashed_token) throw new Error(error?.message || 'Could not create a sign-in link.');
+      return data.properties.hashed_token;
+    },
     async listEvents(tokens) {
       if (!tokens.length) return [];
       return ok(await sb.from('email_events').select('*').in('token', tokens).order('occurred_at', { ascending: true }).limit(5000));

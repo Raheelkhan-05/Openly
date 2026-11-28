@@ -3,6 +3,8 @@ const path = require('path');
 const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
+const compression = require('compression');
+const { createCache } = require('./lib/cache');
 const { summarize } = require('./lib/summarize');
 const { computeInsights } = require('./lib/insights');
 const { classifySource } = require('./lib/sources');
@@ -48,29 +50,41 @@ function group(rows) {
   return m;
 }
 
-function createApp({ store, config, verifyToken }) {
+function createApp({ store, config, verifyToken, cache: shared = createCache(), waitUntil = null }) {
   const app = express();
   app.set('trust proxy', 1);
   app.disable('x-powered-by');
   app.use(cors({ origin: true, allowedHeaders: ['content-type', 'x-api-key', 'authorization'], methods: ['GET', 'POST', 'DELETE', 'OPTIONS'], maxAge: 600 }));
+  app.use(compression());
   app.use(express.json({ limit: '256kb' }));
 
   app.get('/healthz', (req, res) => res.json({ ok: true }));
 
-  /* ---- who owns a tracking token (remembered for a minute) ---- */
-  const cache = new Map();
-  async function emailFor(token) {
-    const hit = cache.get(token);
-    if (hit && hit.exp > Date.now()) return hit.email;
-    const email = await store.getEmail(token);
-    if (email) {
-      if (cache.size > 5000) cache.clear();
-      cache.set(token, { email, exp: Date.now() + 60000 });
-    }
-    return email;
+  /* ---- work that can finish after the answer has gone out (the tracking image must never wait for the database) ---- */
+  function defer(promise) {
+    const p = Promise.resolve(promise).catch((e) => console.error('Background work failed:', e.message));
+    if (waitUntil) { try { waitUntil(p); } catch { /* not on Vercel */ } }
+    return p;
   }
 
-  async function record(token, type, linkN, req) {
+  /* ---- who owns a tracking token: this process (a minute), then Redis (5 minutes, if set up), then the database ---- */
+  const local = new Map();
+  const forget = (token) => { local.delete(token); return shared.del('e:' + token); };
+  async function emailFor(token) {
+    const hit = local.get(token);
+    if (hit && hit.exp > Date.now()) return hit.email;
+    let email = await shared.get('e:' + token);
+    if (!email) email = await store.getEmail(token);
+    if (local.size > 5000) local.clear();
+    // Unknown ids (scanners, old emails) are remembered for a few seconds so they cost no database reads.
+    local.set(token, { email: email || null, exp: Date.now() + (email ? 60000 : 5000) });
+    if (email) shared.set('e:' + token, email, 300).catch(() => {});
+    return email;
+  }
+  const verKey = (owner) => 'v:' + owner;
+  const touch = (owner) => shared.bump(verKey(owner)).catch(() => {}); // something changed: cached answers for this person are out of date
+
+  async function record(token, type, linkN, req, occurredAt) {
     const email = await emailFor(token);
     if (!email) return false; // not one of ours
     const ua = String(req.get('user-agent') || '').slice(0, 400);
@@ -79,10 +93,12 @@ function createApp({ store, config, verifyToken }) {
       owner: email.owner,
       type,
       link_n: linkN,
+      occurred_at: occurredAt,
       user_agent: ua,
       source: classifySource(req.ip, ua),
       ip_hash: crypto.createHash('sha256').update(config.ipSalt + (req.ip || '')).digest('hex').slice(0, 16),
     });
+    await touch(email.owner);
     return true;
   }
 
@@ -95,7 +111,8 @@ function createApp({ store, config, verifyToken }) {
   }, express.static(path.join(__dirname, '..', 'web'), {
     index: 'index.html',
     dotfiles: 'ignore',
-    setHeaders: (res, file) => res.set('Cache-Control', /\.html$/.test(file) ? 'no-cache' : 'public, max-age=300'),
+    // The page references its scripts and styles by content hash (see tools/build-web.js), so those can be kept for a year.
+    setHeaders: (res, file) => res.set('Cache-Control', /\.html$/.test(file) ? 'no-cache' : /\.(js|css)$/.test(file) ? 'public, max-age=31536000, immutable' : 'public, max-age=86400'),
   }));
 
   /* ---- public: the tracking image and the link redirect ---- */
@@ -112,11 +129,15 @@ function createApp({ store, config, verifyToken }) {
   }
   app.get('/t/:file', publicLimiter, async (req, res) => {
     const m = PIXEL_FILE.exec(req.params.file);
-    if (m) {
-      try { await withTimeout(record(m[1].toLowerCase(), 'open', null, req), 2500); }
+    const at = new Date().toISOString();
+    if (m && config.deferWrites === false) {
+      try { await withTimeout(record(m[1].toLowerCase(), 'open', null, req, at), 2500); }
       catch (e) { console.error('Could not save open:', e.message); }
+      return sendGif(res);
     }
+    // The image goes out immediately. Saving the open continues in the background.
     sendGif(res);
+    if (m) defer(withTimeout(record(m[1].toLowerCase(), 'open', null, req, at), 8000));
   });
 
   // Links are looked up from what the sender registered, never taken from the address, so this can't be abused as an open redirect.
@@ -130,9 +151,14 @@ function createApp({ store, config, verifyToken }) {
     try { email = await emailFor(token); } catch (e) { console.error(e.message); return notFound(); }
     const link = (email?.links || []).find((l) => l.n === n);
     if (!link || !isHttpUrl(link.url)) return notFound();
-    try { await withTimeout(record(token, 'click', n, req), 2500); }
-    catch (e) { console.error('Could not save click:', e.message); }
+    const at = new Date().toISOString();
+    if (config.deferWrites === false) {
+      try { await withTimeout(record(token, 'click', n, req, at), 2500); }
+      catch (e) { console.error('Could not save click:', e.message); }
+      return res.redirect(302, link.url);
+    }
     res.redirect(302, link.url);
+    defer(withTimeout(record(token, 'click', n, req, at), 8000));
   });
 
   /* ---- everything below needs a signed-in person ---- */
@@ -141,9 +167,11 @@ function createApp({ store, config, verifyToken }) {
   const auth = wrap(async (req, res, next) => {
     if (config.authMode === 'supabase') {
       const bearer = /^Bearer (.+)$/i.exec(req.get('authorization') || '');
-      const uid = bearer ? await verifyToken(bearer[1]) : null;
+      const who = bearer ? await verifyToken(bearer[1]) : null;
+      const uid = typeof who === 'string' ? who : who?.uid;
       if (!uid) return res.status(401).json({ error: 'Please sign in again.' });
       req.owner = uid;
+      req.email = typeof who === 'object' ? who.email : '';
       return next();
     }
     if (expected && crypto.timingSafeEqual(sha(req.get('x-api-key') || ''), expected)) {
@@ -154,13 +182,26 @@ function createApp({ store, config, verifyToken }) {
   });
   app.use('/api', apiLimiter, auth);
 
-  async function summaries(owner, { limit = 100, emails = null } = {}) {
-    const list = emails || (await store.listEmails(owner, limit));
+  async function build(list, mutes) {
     const tokens = list.map((e) => e.token);
-    const [events, views, mutes] = await Promise.all([store.listEvents(tokens), store.listSenderViews(tokens), store.listMutes(owner)]);
+    const [events, views] = await Promise.all([store.listEvents(tokens), store.listSenderViews(tokens)]);
     const ev = group(events);
     const vw = group(views);
     return list.map((e) => summarize(e, ev.get(e.token) || [], vw.get(e.token) || [], mutes, config.rules));
+  }
+  async function summaries(owner, { limit = 100, emails = null } = {}) {
+    const [list, mutes] = await Promise.all([emails || store.listEmails(owner, limit), store.listMutes(owner)]);
+    return build(list, mutes);
+  }
+  // Answers that only change when something happens (a new open, a new email, ...) are kept until then. Each write bumps a
+  // per-person counter; a stored answer is used only while its counter is still the current one.
+  async function remembered(owner, name, compute) {
+    const dataKey = `c:${owner}:${name}`;
+    const { ver, entry } = await shared.readVersioned(verKey(owner), dataKey);
+    if (entry && entry.ver === ver && entry.exp > Date.now()) return entry.body;
+    const body = await compute();
+    if (body !== undefined && body !== null) defer(shared.writeVersioned(dataKey, { ver, body, exp: Date.now() + 5 * 60000 }, 600));
+    return body;
   }
   const strip = ({ events, ...rest }) => rest;
   const tokenParam = (req, res) => {
@@ -179,10 +220,12 @@ function createApp({ store, config, verifyToken }) {
     const minutes = Math.min(Math.max(Math.round(Number(req.body?.minutes)) || 0, 1), 480);
     const now = Date.now();
     await store.addMute(req.owner, new Date(now - 5000).toISOString(), new Date(now + minutes * 60000).toISOString());
+    await touch(req.owner);
     res.json({ ok: true, pause_until: new Date(now + minutes * 60000).toISOString() });
   }));
   app.delete('/api/pause', wrap(async (req, res) => {
     await store.clearMutes(req.owner);
+    await touch(req.owner);
     res.json({ ok: true });
   }));
 
@@ -211,7 +254,7 @@ function createApp({ store, config, verifyToken }) {
       if (existing && existing.owner !== req.owner) return res.status(409).json({ error: 'This tracking id belongs to someone else.' });
       await store.upsertEmail(row);
     }
-    cache.delete(token);
+    await Promise.all([forget(token), touch(req.owner)]);
     res.status(201).json({ ok: true });
   }));
 
@@ -231,7 +274,7 @@ function createApp({ store, config, verifyToken }) {
     if (!Object.keys(patch).length) return res.status(400).json({ error: 'Nothing to update.' });
     const row = await store.updateEmail(req.owner, token, patch);
     if (!row) return res.status(404).json({ error: 'Unknown email.' });
-    cache.delete(token);
+    await Promise.all([forget(token), touch(req.owner)]);
     res.json({ ok: true });
   }));
 
@@ -240,25 +283,37 @@ function createApp({ store, config, verifyToken }) {
     const email = await store.getEmail(token);
     if (!email || email.owner !== req.owner) return res.status(404).json({ error: 'Unknown email.' });
     await store.addSenderView(req.owner, token);
+    await touch(req.owner);
     res.json({ ok: true });
   }));
 
+  const privateNoCache = (res) => res.set('Cache-Control', 'private, no-cache');
   app.get('/api/emails', wrap(async (req, res) => {
     const limit = Math.min(Math.max(Number(req.query.limit) || 100, 1), 200);
-    res.json({ emails: (await summaries(req.owner, { limit })).map(strip), server_time: new Date().toISOString() });
+    const emails = await remembered(req.owner, 'list:' + limit, async () => (await summaries(req.owner, { limit })).map(strip));
+    privateNoCache(res);
+    // The tag is made from the emails only, so a list that has not changed answers 304 even though the time moves on.
+    res.set('ETag', 'W/"' + crypto.createHash('sha1').update(JSON.stringify(emails)).digest('base64url').slice(0, 22) + '"');
+    res.json({ emails, server_time: new Date().toISOString() });
   }));
 
   app.get('/api/emails/:token', wrap(async (req, res) => {
     const token = tokenParam(req, res); if (!token) return;
-    const email = await store.getEmail(token);
-    if (!email || email.owner !== req.owner) return res.status(404).json({ error: 'This email is no longer tracked.' });
-    res.json({ email: (await summaries(req.owner, { emails: [email] }))[0] });
+    const email = await remembered(req.owner, 'one:' + token, async () => {
+      // Everything about one email is fetched at the same time, not one query after another.
+      const [row, events, views, mutes] = await Promise.all([store.getEmail(token), store.listEvents([token]), store.listSenderViews([token]), store.listMutes(req.owner)]);
+      if (!row || row.owner !== req.owner) return null;
+      return summarize(row, events, views, mutes, config.rules);
+    });
+    if (!email) return res.status(404).json({ error: 'This email is no longer tracked.' });
+    privateNoCache(res);
+    res.json({ email });
   }));
 
   app.delete('/api/emails/:token', wrap(async (req, res) => {
     const token = tokenParam(req, res); if (!token) return;
     await store.deleteEmail(req.owner, token);
-    cache.delete(token);
+    await Promise.all([forget(token), touch(req.owner)]);
     res.json({ ok: true });
   }));
 
@@ -267,12 +322,15 @@ function createApp({ store, config, verifyToken }) {
     if (!Number.isInteger(id)) return res.status(400).json({ error: 'Invalid event.' });
     const found = await store.markEventMine(req.owner, id, req.body?.mine !== false);
     if (!found) return res.status(404).json({ error: 'Unknown event.' });
+    await touch(req.owner);
     res.json({ ok: true });
   }));
 
   app.get('/api/insights', wrap(async (req, res) => {
-    const list = await summaries(req.owner, { limit: 200 });
-    res.json(computeInsights(list, Number(req.query.tz) || 0));
+    const tz = Number(req.query.tz) || 0;
+    const out = await remembered(req.owner, 'insights:' + tz, async () => computeInsights(await summaries(req.owner, { limit: 200 }), tz));
+    privateNoCache(res);
+    res.json(out);
   }));
 
   // New activity, for notifications. after_id=latest just returns the current position.
@@ -312,6 +370,7 @@ function createApp({ store, config, verifyToken }) {
   app.post('/api/emails/:token/reminded', wrap(async (req, res) => {
     const token = tokenParam(req, res); if (!token) return;
     await store.markReminded(req.owner, token);
+    await touch(req.owner);
     res.json({ ok: true });
   }));
 
@@ -322,8 +381,18 @@ function createApp({ store, config, verifyToken }) {
   }));
   app.delete('/api/data', wrap(async (req, res) => {
     await store.deleteAll(req.owner);
-    cache.clear();
+    local.clear();
+    await touch(req.owner);
     res.json({ ok: true });
+  }));
+
+  // Lets a signed-in extension, add-on or browser open the web dashboard already signed in, without typing a code again.
+  // The returned one-time value is exchanged by the web dashboard for its OWN session, so the two never share a refresh token.
+  const handoffLimiter = rateLimit({ windowMs: 60_000, limit: 10, standardHeaders: false, legacyHeaders: false, message: { error: 'Too many requests. Try again in a minute.' } });
+  app.post('/api/handoff', handoffLimiter, wrap(async (req, res) => {
+    if (config.authMode !== 'supabase') return res.status(400).json({ error: 'This is only available with Openly Cloud.' });
+    if (!req.email) return res.status(400).json({ error: 'Your account has no email address.' });
+    res.json({ token_hash: await store.createLoginLink(req.email) });
   }));
 
   app.use((req, res) => res.status(404).json({ error: 'Not found.' }));

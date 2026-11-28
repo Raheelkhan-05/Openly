@@ -69,8 +69,40 @@ globalThis.Openly = (() => {
     await storeSession(r.data);
     await saveSettings({ mode: 'cloud', signedIn: true, accountEmail: r.data.user?.email || email.trim() });
   }
+  // Signs in with the one-time value that another signed-in Openly (the extension or the add-on) made. This gets its OWN session
+  // from Supabase, so two devices never share (and so never invalidate) each other's refresh token.
+  async function signInWithHandoff(tokenHash) {
+    const r = await authCall('/auth/v1/verify', { type: 'magiclink', token_hash: String(tokenHash).trim() });
+    if (!r.ok || !r.data?.access_token) throw new ApiError('This sign-in link has expired or was already used. Open it again from the extension.', r.status, 'auth');
+    await storeSession(r.data);
+    await saveSettings({ mode: 'cloud', signedIn: true, accountEmail: r.data.user?.email || '' });
+  }
+  // The address that opens the web dashboard already signed in (works once; fine to show as a QR code for a phone).
+  async function webHandoffUrl(hash = '') {
+    const s = await getSettings();
+    if (!isConfigured(s)) throw new ApiError('Sign in first.', 401, 'unauthorized');
+    const base = backendOf(s) + '/app/';
+    const tail = hash ? '&go=' + encodeURIComponent(hash) : '';
+    if (s.mode === 'cloud') {
+      const r = await api('/api/handoff', { method: 'POST', settings: s });
+      return base + '#handoff=' + encodeURIComponent(r.token_hash) + tail;
+    }
+    return base + '#server=' + encodeURIComponent(backendOf(s)) + '&key=' + encodeURIComponent(s.apiKey.trim()) + tail;
+  }
+  // Reads a handoff out of the page address (web dashboard only). Returns where to go next, or null when there was none.
+  async function consumeHandoff() {
+    const h = location.hash.replace(/^#/, '');
+    if (!/(^|&)(handoff|server)=/.test(h)) return null;
+    const p = new URLSearchParams(h);
+    history.replaceState(null, '', location.pathname); // the secret must not stay in the address bar or history
+    const go = p.get('go') || '';
+    if (p.get('handoff')) { await signInWithHandoff(p.get('handoff')); return go; }
+    if (p.get('server') && p.get('key')) { await saveSettings({ mode: 'selfhost', backendUrl: normalizeBase(p.get('server')), apiKey: p.get('key') }); return go; }
+    return null;
+  }
   async function signOut() {
-    await chrome.storage.local.remove(['session', 'cursor', 'pending']);
+    const all = await chrome.storage.local.get(null);
+    await chrome.storage.local.remove(['session', 'cursor', 'pending', ...Object.keys(all).filter((k) => k.startsWith('cache:'))]);
     await saveSettings({ signedIn: false, accountEmail: '' });
   }
 
@@ -114,6 +146,18 @@ globalThis.Openly = (() => {
     } finally {
       clearTimeout(timer);
     }
+  }
+
+  /* ---------- remembered answers: show the last list at once, then refresh it ---------- */
+  const keyOf = async (name) => { const s = await getSettings(); return `cache:${s.mode}:${s.accountEmail || s.backendUrl || ''}:${name}`; };
+  async function peek(name) {
+    const k = await keyOf(name);
+    const r = await chrome.storage.local.get(k);
+    return r[k] || null; // { data, at }
+  }
+  async function stash(name, data) {
+    const k = await keyOf(name);
+    try { await chrome.storage.local.set({ [k]: { data, at: Date.now() } }); } catch { /* storage full: skip */ }
   }
 
   /* ---------- wording ---------- */
@@ -195,6 +239,12 @@ globalThis.Openly = (() => {
     info: '<circle cx="12" cy="12" r="8.5"/><path d="M12 11v5M12 8h.01"/>',
     link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
     download: '<path d="M12 4v11M7.5 10.5 12 15l4.5-4.5M5 19h14"/>',
+    external: '<path d="M14 5h5v5M19 5l-8 8M18 14v4a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 6 18V9a1.5 1.5 0 0 1 1.5-1.5H10"/>',
+    phone: '<rect x="7" y="3" width="10" height="18" rx="2.5"/><path d="M11 18h2"/>',
+    logout: '<path d="M10 5H7.5A1.5 1.5 0 0 0 6 6.5v11A1.5 1.5 0 0 0 7.5 19H10M14 8l4 4-4 4M18 12H9.5"/>',
+    close: '<path d="m6 6 12 12M18 6 6 18"/>',
+    pointer: '<path d="m9 4 1.2 11 2.3-2.6 3.3 5.2 1.8-1.1-3.2-5.1 3.6-.5z"/>',
+    clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>',
   };
   function svgBase(size, sw) {
     const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -227,7 +277,7 @@ globalThis.Openly = (() => {
 
   return {
     DEFAULTS, ApiError, cloudAvailable, getSettings, saveSettings, normalizeBase, backendOf, isConfigured,
-    requestCode, verifyCode, signOut, api,
+    requestCode, verifyCode, signInWithHandoff, webHandoffUrl, consumeHandoff, peek, stash, signOut, api,
     STATUS, CONFIDENCE, confidenceText, recipientsLabel, everyone, gmailSearchUrl, webDashboardUrl, timeAgo, formatDate, formatDateSec, formatTime, h, icon, tick,
   };
 })();

@@ -2,6 +2,7 @@ const { config, validate } = require('./config');
 const { createStore } = require('./store');
 const { createApp } = require('./app');
 const { createVerifier } = require('./lib/verifier');
+const { createCache } = require('./lib/cache');
 const { loadAppleRanges } = require('./lib/sources');
 
 const problems = validate(config);
@@ -11,7 +12,7 @@ if (problems.length) {
 }
 const store = createStore(config);
 if (store.name === 'memory') console.warn('Using the in-memory store. Data is lost when the server stops.');
-const verifyToken = config.authMode === 'supabase' ? createVerifier(store.client) : null;
+const verifyToken = config.authMode === 'supabase' ? createVerifier(store.client, { supabaseUrl: config.supabaseUrl, jwtSecret: config.jwtSecret }) : null;
 
 if (config.appleRanges) {
   loadAppleRanges()
@@ -19,6 +20,6 @@ if (config.appleRanges) {
     .catch((e) => console.warn('Could not load Apple ranges:', e.message));
 }
 
-createApp({ store, config, verifyToken }).listen(config.port, () => {
+createApp({ store, config, verifyToken, cache: createCache({ url: config.redisUrl, token: config.redisToken }) }).listen(config.port, () => {
   console.log(`Openly backend listening on port ${config.port} (storage: ${store.name}, accounts: ${config.authMode})`);
 });
